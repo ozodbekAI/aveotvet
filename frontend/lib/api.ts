@@ -1,8 +1,7 @@
 import { getAuthToken } from "@/lib/auth"
 
-// Configure backend base URL via env:
-//   NEXT_PUBLIC_API_URL=http://localhost:8000
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://aveotvet.ozodbek-akramov.uz"
 
 export async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== "undefined" ? getAuthToken() : null

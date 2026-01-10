@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import select, func, and_, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,6 +60,11 @@ class FeedbackRepo:
         user_name: str | None,
         limit: int,
         offset: int,
+        date_from_unix: int | None = None,
+        date_to_unix: int | None = None,
+        rating: int | None = None,
+        has_text: bool | None = None,
+        has_media: bool | None = None,
     ) -> tuple[list[Feedback], int]:
         cond = [Feedback.shop_id == shop_id]
         if is_answered is True:
@@ -68,15 +73,52 @@ class FeedbackRepo:
             cond.append(Feedback.answer_text.is_(None))
         if user_name:
             cond.append(Feedback.user_name == user_name)
+        # Date range
+        if date_from_unix is not None:
+            dt_from = datetime.fromtimestamp(int(date_from_unix), tz=timezone.utc)
+            cond.append(Feedback.created_date >= dt_from)
+        if date_to_unix is not None:
+            dt_to = datetime.fromtimestamp(int(date_to_unix), tz=timezone.utc)
+            cond.append(Feedback.created_date <= dt_to)
+
+        # Rating
+        if rating is not None:
+            cond.append(Feedback.product_valuation == int(rating))
+
+        # Text presence
+        if has_text is True:
+            cond.append(and_(Feedback.text.is_not(None), func.length(func.trim(Feedback.text)) > 0))
+        elif has_text is False:
+            cond.append(or_(Feedback.text.is_(None), func.length(func.trim(Feedback.text)) == 0))
+
+        # Media presence (photoLinks or video)
+        photo_len = func.coalesce(func.jsonb_array_length(Feedback.photo_links), 0)
+        if has_media is True:
+            cond.append(or_(photo_len > 0, Feedback.video.is_not(None)))
+        elif has_media is False:
+            cond.append(and_(photo_len == 0, Feedback.video.is_(None)))
+
         if q:
-            like = f"%{q}%"
-            cond.append(
-                or_(
-                    Feedback.text.ilike(like),
-                    Feedback.pros.ilike(like),
-                    Feedback.cons.ilike(like),
-                )
-            )
+            qv = q.strip()
+            like = f"%{qv}%"
+
+            exprs = [
+                Feedback.text.ilike(like),
+                Feedback.pros.ilike(like),
+                Feedback.cons.ilike(like),
+                # Search product details (name, brand, supplier article)
+                Feedback.product_details["productName"].astext.ilike(like),
+                Feedback.product_details["brandName"].astext.ilike(like),
+                Feedback.product_details["supplierArticle"].astext.ilike(like),
+            ]
+
+            if qv.isdigit():
+                # Direct match by nmId / imtId stored in productDetails
+                exprs.append(Feedback.product_details["nmId"].astext == qv)
+                exprs.append(Feedback.product_details["nmID"].astext == qv)
+                exprs.append(Feedback.product_details["imtId"].astext == qv)
+
+            cond.append(or_(*exprs))
 
         base = select(Feedback).where(and_(*cond))
         total_q = select(func.count()).select_from(base.subquery())

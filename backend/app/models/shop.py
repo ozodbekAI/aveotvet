@@ -22,3 +22,4 @@ class Shop(Base):
     settings = relationship("ShopSettings", back_populates="shop", uselist=False, cascade="all,delete-orphan")
     feedbacks = relationship("Feedback", back_populates="shop", cascade="all,delete-orphan")
     questions = relationship("Question", back_populates="shop", cascade="all,delete-orphan")
+    product_cards = relationship("ProductCard", back_populates="shop", cascade="all,delete-orphan")

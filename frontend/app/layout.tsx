@@ -8,8 +8,8 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "WB Otveto - Feedback Management",
-  description: "Manage Wildberries feedback and customer interactions",
+  title: "AVEOTVET - Marketplace Feedback Management",
+  description: "Manage marketplace feedback, reviews, questions and chats",
   generator: "v0.app",
   icons: {
     icon: [

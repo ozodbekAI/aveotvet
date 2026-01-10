@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import enum
 
-
 class DraftStatus(str, enum.Enum):
-    drafted = "drafted"
-    approved = "approved"
-    rejected = "rejected"
-    published = "published"
-    sent = "sent"
-    error = "error"
+    """Draft status."""
+    drafted = "drafted"      # Auto-generated, waiting for review
+    published = "published"  # Approved and published to marketplace
+    rejected = "rejected"    # Rejected by user, won't be published
+    
+    @classmethod
+    def values(cls) -> list[str]:
+        return [e.value for e in cls]
 
 
 class JobStatus(str, enum.Enum):
@@ -32,3 +33,5 @@ class JobType(str, enum.Enum):
     sync_chat_events = "sync_chat_events"
     generate_chat_draft = "generate_chat_draft"
     send_chat_message = "send_chat_message"
+
+    sync_product_cards = "sync_product_cards"

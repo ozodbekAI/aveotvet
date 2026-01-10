@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RefreshCw, MessageCircle } from "lucide-react"
+import { listChats, syncChats, getJobStatus } from "@/lib/api"
 
 interface ChatSession {
   chat_id: string
@@ -30,14 +31,8 @@ export default function ChatList({ shopId, token }: ChatsListProps) {
   const loadChats = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch(`/api/chats/${shopId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-
-      if (res.ok) {
-        const data = await res.json()
-        setChats(Array.isArray(data) ? data : [])
-      }
+      const data = await listChats(shopId)
+      setChats(Array.isArray(data) ? data : [])
     } catch (err) {
       console.error("Failed to load chats:", err)
     } finally {
@@ -48,32 +43,25 @@ export default function ChatList({ shopId, token }: ChatsListProps) {
   const handleSync = async () => {
     setIsSyncing(true)
     try {
-      const res = await fetch(`/api/chats/${shopId}/sync`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      })
-
-      if (res.ok) {
-        const data = await res.json()
-        const interval = setInterval(async () => {
-          const jobRes = await fetch(`/api/jobs/${data.job_id}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-          if (jobRes.ok) {
-            const job = await jobRes.json()
-            if (job.status === "done") {
-              clearInterval(interval)
-              setIsSyncing(false)
-              loadChats()
-            } else if (job.status === "failed") {
-              clearInterval(interval)
-              setIsSyncing(false)
-            }
+      const data: any = await syncChats(shopId)
+      const interval = setInterval(async () => {
+        try {
+          const job: any = await getJobStatus(data.job_id)
+          if (job.status === "done") {
+            clearInterval(interval)
+            setIsSyncing(false)
+            loadChats()
+          } else if (job.status === "failed") {
+            clearInterval(interval)
+            setIsSyncing(false)
           }
-        }, 2000)
-      }
+        } catch (err) {
+          clearInterval(interval)
+        }
+      }, 2000)
     } catch (err) {
       console.error("Sync failed:", err)
+      setIsSyncing(false)
     }
   }
 

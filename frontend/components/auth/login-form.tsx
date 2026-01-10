@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card"
 import { login } from "@/lib/api"
 import { setAuthToken } from "@/lib/auth"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 
 interface LoginFormProps {
   onSuccess?: () => void
@@ -51,10 +52,14 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md bg-card border border-border">
         <div className="p-8">
-          <h1 className="text-2xl font-bold text-foreground mb-2">WB Otveto</h1>
-          <p className="text-muted-foreground mb-8">Manage Wildberries feedback and responses</p>
+          <div className="mb-2">
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent">
+              AVEOTVET
+            </h1>
+          </div>
+          <p className="text-muted-foreground mb-8 text-sm">Marketplace feedback management platform</p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -64,7 +69,7 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                 placeholder="your@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="mt-2"
+                className="mt-2 bg-input border-border text-foreground placeholder:text-muted-foreground"
                 required
               />
             </div>
@@ -76,28 +81,28 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="mt-2"
+                className="mt-2 bg-input border-border text-foreground placeholder:text-muted-foreground"
                 required
               />
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded p-3">
-                <p className="text-sm text-red-700">{error}</p>
+              <div className="bg-destructive/10 border border-destructive/30 rounded p-3">
+                <p className="text-sm text-destructive">{error}</p>
               </div>
             )}
 
-            <Button type="submit" disabled={isLoading} className="w-full">
+            <Button type="submit" disabled={isLoading} className="w-full bg-primary hover:bg-primary/90">
               {isLoading ? "Signing in..." : "Sign in"}
             </Button>
           </form>
 
-          <div className="mt-6 p-3 bg-blue-50 border border-blue-200 rounded">
-            <p className="text-xs text-blue-700">
-              <strong>⚠️ Important:</strong> Make sure your backend is running at{" "}
-              <code className="bg-white px-1 py-0.5 rounded text-blue-900">
-                {process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}
-              </code>
+          <div className="mt-6 pt-6 border-t border-border">
+            <p className="text-sm text-muted-foreground text-center">
+              Don't have an account?{" "}
+              <Link href="/register" className="text-primary hover:text-primary/80 font-medium">
+                Create one
+              </Link>
             </p>
           </div>
         </div>

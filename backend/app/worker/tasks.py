@@ -16,6 +16,7 @@ from app.repos.question_draft_repo import QuestionDraftRepo
 from app.repos.job_repo import JobRepo
 from app.repos.chat_repo import ChatRepo
 from app.services.sync import sync_feedbacks, sync_questions
+from app.services.product_cards_sync import sync_product_cards
 from app.services.openai_client import OpenAIService
 from app.services.drafting import generate_draft_text, effective_mode_for_rating, contains_blacklist
 from app.services.question_drafting import generate_question_draft_text
@@ -55,6 +56,9 @@ async def handle_job(session: AsyncSession, job_type: str, payload: dict) -> Non
         return
     if job_type == JobType.send_chat_message.value:
         await _job_send_chat_message(session, payload)
+        return
+    if job_type == JobType.sync_product_cards.value:
+        await _job_sync_product_cards(session, payload)
         return
     raise ValueError(f"Unknown job type: {job_type}")
 
@@ -140,17 +144,21 @@ async def _job_sync_questions(session: AsyncSession, payload: dict) -> None:
         date_to_unix=date_to_unix,
     )
 
-    # enqueue drafts for unanswered questions if enabled
-    if settings_obj.questions_auto_draft and not is_answered and (settings_obj.questions_reply_mode in ("semi", "auto")):
-        repo = QuestionRepo(session)
-        questions, _ = await repo.list(shop_id=shop_id, is_answered=False, q=None, user_name=None, limit=take, offset=0)
-        job_repo = JobRepo(session)
-        draft_repo = QuestionDraftRepo(session)
-        for q in questions:
-            existing = await draft_repo.latest_for_question(q.id)
-            if existing:
-                continue
-            await job_repo.enqueue(JobType.generate_question_draft.value, {"shop_id": shop_id, "question_id": q.id})
+
+async def _job_sync_product_cards(session: AsyncSession, payload: dict) -> None:
+    """Sync product cards (Content API) to be able to return product photos with feedbacks."""
+    shop_id = int(payload["shop_id"])
+    pages = int(payload.get("pages", 5))
+    limit = int(payload.get("limit", 100))
+
+    shop = await session.get(Shop, shop_id)
+    if not shop:
+        return
+    settings_obj = await ShopRepo(session).get_settings(shop_id)
+    if not settings_obj:
+        return
+
+    await sync_product_cards(session, shop, settings_obj, pages=pages, limit=limit)
 
     await session.flush()
 
@@ -181,9 +189,14 @@ async def _job_generate_draft(session: AsyncSession, payload: dict) -> None:
     rating = feedback.product_valuation or 0
     eff_mode = effective_mode_for_rating(settings_obj, rating)
 
-    if (not bl_hit) and settings_obj.auto_publish and eff_mode == "auto":
-        if rating >= int(settings_obj.min_rating_to_autopublish):
-            await JobRepo(session).enqueue(JobType.publish_answer.value, {"shop_id": shop_id, "feedback_id": feedback.id, "draft_id": draft.id})
+    # UI parity: auto-publish is decided by per-rating mode (auto) plus blacklist guard.
+    # Older versions also used `auto_publish` and `min_rating_to_autopublish`, but those
+    # settings do not exist in the UI shown in screenshots and would block per-rating auto.
+    if (not bl_hit) and eff_mode == "auto":
+        await JobRepo(session).enqueue(
+            JobType.publish_answer.value,
+            {"shop_id": shop_id, "feedback_id": feedback.id, "draft_id": draft.id},
+        )
 
 
 async def _job_publish_answer(session: AsyncSession, payload: dict) -> None:
@@ -237,7 +250,9 @@ async def _job_generate_question_draft(session: AsyncSession, payload: dict) -> 
     text, model, response_id = await generate_question_draft_text(openai, question, settings_obj)
     draft = await QuestionDraftRepo(session).create(question_id=question.id, text=text, openai_model=model, openai_response_id=response_id)
 
-    if (not bl_hit) and settings_obj.questions_auto_publish and settings_obj.questions_reply_mode == "auto":
+    # UI parity: auto-publish for questions is defined by mode = "auto" (plus blacklist guard).
+    # Older versions also had `questions_auto_publish`, but it would block UI mode.
+    if (not bl_hit) and settings_obj.questions_reply_mode == "auto":
         await JobRepo(session).enqueue(
             JobType.publish_question_answer.value,
             {"shop_id": shop_id, "question_id": question.id, "draft_id": draft.id},

@@ -1,7 +1,17 @@
 import { getAuthToken } from "@/lib/auth"
 
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://aveotvet.ozodbek-akramov.uz"
+/**
+ * Backend base URL.
+ *
+ * Recommended setup (dev):
+ *  - Leave NEXT_PUBLIC_API_URL empty
+ *  - Run backend on http://127.0.0.1:8000
+ *  - next.config.mjs rewrites /api/* -> backend
+ *
+ * Production setup:
+ *  - Set NEXT_PUBLIC_API_URL to your backend origin (e.g. https://api.example.com)
+ */
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "")
 
 export async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== "undefined" ? getAuthToken() : null
@@ -90,10 +100,16 @@ export async function getShop(shopId: number) {
   return apiCall(`/api/shops/${shopId}`)
 }
 
-export async function createShop(name: string, wbToken: string) {
+// createShop accepts either (name, wbToken) or an object {name, wb_token}
+export async function createShop(nameOrPayload: string | { name: string; wb_token: string }, wbToken?: string) {
+  const payload =
+    typeof nameOrPayload === "string"
+      ? { name: nameOrPayload, wb_token: wbToken || "" }
+      : { name: nameOrPayload.name, wb_token: nameOrPayload.wb_token }
+
   return apiCall("/api/shops", {
     method: "POST",
-    body: JSON.stringify({ name, wb_token: wbToken }),
+    body: JSON.stringify(payload),
   })
 }
 
@@ -126,13 +142,11 @@ export async function getFeedback(shopId: number, wbId: string) {
   return apiCall(`/api/feedbacks/${shopId}/${wbId}`)
 }
 
-export async function syncFeedbacks(shopId: number, filters?: any) {
+export async function syncFeedbacks(shopId: number) {
   return apiCall(`/api/feedbacks/${shopId}/sync`, {
     method: "POST",
-    body: JSON.stringify(filters || {}),
   })
 }
-
 export async function generateFeedbackDraft(shopId: number, wbId: string) {
   return apiCall(`/api/feedbacks/${shopId}/${wbId}/draft`, {
     method: "POST",
@@ -196,6 +210,54 @@ export async function rejectQuestion(shopId: number, wbId: string) {
   })
 }
 
+// Drafts (auto-generated answers for reviews)
+export async function listDrafts(
+  shopId: number,
+  params?: { status?: "drafted" | "published" | "rejected"; limit?: number; offset?: number },
+) {
+  const qs = new URLSearchParams()
+  if (params?.status) qs.set("status", params.status)
+  if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+  if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+  const q = qs.toString()
+  return apiCall(`/api/drafts/${shopId}/drafts${q ? `?${q}` : ""}`)
+}
+
+export async function listPendingDrafts(shopId: number, params?: { limit?: number; offset?: number }) {
+  const qs = new URLSearchParams()
+  if (params?.limit !== undefined) qs.set("limit", String(params.limit))
+  if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+  const q = qs.toString()
+  return apiCall(`/api/drafts/${shopId}/drafts/pending${q ? `?${q}` : ""}`)
+}
+
+export async function getDraft(shopId: number, draftId: number) {
+  return apiCall(`/api/drafts/${shopId}/drafts/${draftId}`)
+}
+
+export async function updateDraft(shopId: number, draftId: number, payload: { text?: string; status?: string }) {
+  return apiCall(`/api/drafts/${shopId}/drafts/${draftId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function approveDraft(shopId: number, draftId: number) {
+  return apiCall(`/api/drafts/${shopId}/drafts/${draftId}/approve`, { method: "POST" })
+}
+
+export async function rejectDraft(shopId: number, draftId: number) {
+  return apiCall(`/api/drafts/${shopId}/drafts/${draftId}/reject`, { method: "POST" })
+}
+
+export async function regenerateDraft(shopId: number, draftId: number) {
+  return apiCall(`/api/drafts/${shopId}/drafts/${draftId}/regenerate`, { method: "POST" })
+}
+
+export async function getDraftStats(shopId: number) {
+  return apiCall(`/api/drafts/${shopId}/drafts/stats`)
+}
+
 // Chats
 export async function listChats(shopId: number, filters?: any) {
   const params = new URLSearchParams()
@@ -231,11 +293,16 @@ export async function generateChatDraft(shopId: number, chatId: string) {
   })
 }
 
-export async function sendChatMessage(shopId: number, chatId: string, message: string, files?: File[]) {
+export async function sendChatMessage(
+  shopId: number,
+  chatId: string,
+  options: { message?: string; useLatestDraft?: boolean; files?: File[] } = {},
+) {
   const formData = new FormData()
-  formData.append("message", message)
-  if (files) {
-    files.forEach((file) => formData.append("files", file))
+  if (options.message !== undefined) formData.append("message", options.message)
+  formData.append("use_latest_draft", String(options.useLatestDraft ?? true))
+  if (options.files?.length) {
+    options.files.forEach((file) => formData.append("files", file))
   }
 
   const token = typeof window !== "undefined" ? getAuthToken() : null

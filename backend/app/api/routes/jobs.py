@@ -13,12 +13,10 @@ router = APIRouter()
 
 
 async def _authorize_job(user_id: int, db: AsyncSession, job: Job) -> None:
-    # Job payload SHOULD contain shop_id for all shop-related jobs.
     shop_id = None
     if isinstance(job.payload, dict):
         shop_id = job.payload.get("shop_id")
     if shop_id is None:
-        # conservative default
         raise HTTPException(status_code=403, detail="Forbidden")
     shop = await ShopRepo(db).get(user_id, int(shop_id))
     if not shop:
@@ -42,12 +40,10 @@ async def list_jobs(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    # list user's jobs by joining via payload.shop_id (we avoid heavy JSONB ops; filter only if shop_id provided)
     q = select(Job).order_by(desc(Job.id)).limit(limit).offset(offset)
     res = await db.execute(q)
     jobs = list(res.scalars().all())
 
-    # filter by ownership and optional shop_id
     out: list[Job] = []
     for j in jobs:
         if not isinstance(j.payload, dict):

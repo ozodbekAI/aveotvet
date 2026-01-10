@@ -7,9 +7,10 @@ from app.models.feedback import Feedback
 from app.models.settings import ShopSettings
 from app.services.openai_client import OpenAIService
 from app.core.config import settings
+from app.services.prompt_prefs import load_prompt_prefs, tone_instruction, pick_signature
 
 
-_MAX_LEN = 5000
+_MAX_LEN_HARD = 5000
 
 PHONE_RE = re.compile(r"(\+?\d[\d\s\-()]{7,}\d)")
 URL_RE = re.compile(r"(https?://\S+)", re.IGNORECASE)
@@ -25,34 +26,55 @@ def _bucket_by_rating(rating: int | None) -> str:
 
 
 def build_instructions(shop_settings: ShopSettings) -> str:
+    prefs = load_prompt_prefs(shop_settings)
     lang = shop_settings.language
-    tone = shop_settings.tone
-    sig = None
-    pool = shop_settings.signatures or []
-    if isinstance(pool, list) and pool:
-        try:
-            sig = random.choice([s for s in pool if isinstance(s, str) and s.strip()])
-        except Exception:
-            sig = None
-    if not sig:
-        sig = shop_settings.signature
+
+    base_tone = shop_settings.tone
+
+    sig = pick_signature(shop_settings, kind="review")
+
+    if prefs.address_format == "vy_caps":
+        addr = "Use polite address with capitalized 'Вы/Ваш/Вам'."
+    elif prefs.address_format == "ty":
+        addr = "Use informal address 'ты/твой'."
+    else:
+        addr = "Use polite address 'вы/ваш/вам' (lowercase)."
+
+    if prefs.answer_length == "short":
+        length_pref = "Prefer short replies (1-2 short paragraphs)."
+    elif prefs.answer_length == "long":
+        length_pref = "Prefer detailed replies (2-4 short paragraphs), but avoid unnecessary fluff."
+    else:
+        length_pref = "Prefer medium-length replies (1-3 short paragraphs)."
+
+    emoji_rule = "Do not use emojis." if not prefs.emoji_enabled else "You may use at most 1 relevant emoji if it feels natural."
+
+    stop_words_rule = ""
+    if prefs.stop_words:
+        stop_words_rule = "Avoid using these words/phrases: " + ", ".join(prefs.stop_words[:30])
 
     parts = [
         "You write short, polite marketplace replies to customer feedback.",
         "Output plain text only. No markdown. No links. No phone numbers. No emails.",
         "Keep it respectful, empathic, and professional.",
         "Do not mention that you are an AI.",
-        f"Language: {lang}. Tone: {tone}.",
-        f"Max length: {_MAX_LEN} characters.",
+        addr,
+        length_pref,
+        emoji_rule,
+        f"Language: {lang}. Base tone: {base_tone}.",
+        f"Hard max length: {_MAX_LEN_HARD} characters.",
     ]
+    if stop_words_rule:
+        parts.append(stop_words_rule)
     if sig:
         parts.append(f"End with this signature (if appropriate): {sig}")
     return " ".join(parts)
 
 
 def build_input(feedback: Feedback, shop_settings: ShopSettings) -> str:
+    prefs = load_prompt_prefs(shop_settings)
     pd = feedback.product_details or {}
-    product_name = pd.get("productName")
+    product_name = pd.get("productName") if prefs.mention_product_name else None
     brand = pd.get("brandName")
     nm_id = pd.get("nmId")
     supplier_article = pd.get("supplierArticle")
@@ -60,17 +82,32 @@ def build_input(feedback: Feedback, shop_settings: ShopSettings) -> str:
     bucket = _bucket_by_rating(feedback.product_valuation)
     template = (shop_settings.templates or {}).get(bucket)
 
+    tone_key = {
+        "positive": prefs.tone_positive,
+        "neutral": prefs.tone_neutral,
+        "negative": prefs.tone_negative,
+    }.get(bucket, "none")
+    tone_note = tone_instruction(tone_key)
+
+    buyer_name = feedback.user_name if prefs.use_buyer_name else None
+
     lines = [
         "Customer feedback data:",
         f"- Rating: {feedback.product_valuation}",
-        f"- Buyer name: {feedback.user_name}",
+        f"- Buyer name: {buyer_name}",
         f"- Text: {feedback.text}",
         f"- Pros: {feedback.pros}",
         f"- Cons: {feedback.cons}",
-        f"- Product: {product_name} (brand={brand}, nmId={nm_id}, article={supplier_article})",
+        f"- Product: {product_name} (brand={brand}, nmId={nm_id}, article={supplier_article})" if product_name else f"- Product: (brand={brand}, nmId={nm_id}, article={supplier_article})",
     ]
+    if prefs.photo_reaction_enabled and (feedback.photo_links or feedback.video):
+        lines.append("- Customer attached photos/video: yes. Please thank the customer for the media if appropriate.")
     if template:
         lines.append(f"Preferred reply template for this rating bucket ({bucket}): {template}")
+    if prefs.delivery_method:
+        lines.append(f"- Delivery method selected in shop settings: {prefs.delivery_method}")
+    if tone_note:
+        lines.append(f"- Style requirement (tone of voice): {tone_note}")
     return "\n".join([l for l in lines if l is not None])
 
 
@@ -79,8 +116,8 @@ def sanitize_output(text: str) -> str:
     t = URL_RE.sub("", t)
     t = PHONE_RE.sub("", t)
     t = re.sub(r"\n{3,}", "\n\n", t).strip()
-    if len(t) > _MAX_LEN:
-        t = t[:_MAX_LEN].rstrip()
+    if len(t) > _MAX_LEN_HARD:
+        t = t[:_MAX_LEN_HARD].rstrip()
     return t
 
 

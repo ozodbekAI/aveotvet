@@ -26,7 +26,7 @@ class ShopRepo:
         self.session.add(shop)
         await self.session.flush()
 
-        # default settings
+
         self.session.add(ShopSettings(shop_id=shop.id))
         await self.session.flush()
         return shop

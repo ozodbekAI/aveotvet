@@ -17,6 +17,10 @@ class FeedbackListItem(BaseModel):
     answer_editable: bool | None = None
     product_details: dict | None = None
 
+    # Derived helper fields
+    nm_id: int | None = None
+    product_image_url: str | None = None
+
     class Config:
         from_attributes = True
 

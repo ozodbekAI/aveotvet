@@ -25,6 +25,25 @@ class Settings(BaseSettings):
     WORKER_POLL_INTERVAL_SEC: int = 2
     WORKER_MAX_JOBS_PER_TICK: int = 10
 
+    # Autosync (worker scheduler)
+    AUTO_SYNC_ENABLED: bool = True
+    AUTO_SYNC_INTERVAL_MIN: int = 30
+
+    # Product cards sync (Content API) - used for returning product photo URL in feedback API
+    CARDS_SYNC_ENABLED: bool = True
+    CARDS_SYNC_INTERVAL_MIN: int = 180  # 3h
+    CARDS_SYNC_PAGES_PER_RUN: int = 5
+    CARDS_SYNC_LIMIT: int = 100
+
+    # WB API retry / throttling
+    WB_MAX_RETRIES: int = 5
+    WB_CONTENT_MIN_INTERVAL_SEC: float = 0.65
+
+    # Debug logging for product cards / image resolution.
+    # When enabled, logs will include samples of nmIDs and photo keys.
+    DEBUG_PRODUCT_CARDS: bool = False
+    DEBUG_PRODUCT_CARDS_SAMPLE: int = 25
+
     CORS_ORIGINS: str = "*"
 
 

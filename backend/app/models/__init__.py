@@ -9,3 +9,4 @@ from app.models.question_draft import QuestionDraft
 from app.models.job import Job
 from app.models.audit import AuditLog
 from app.models.chat import ChatSession, ChatEvent, ChatDraft
+from app.models.product_card import ProductCard

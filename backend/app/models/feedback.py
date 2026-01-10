@@ -46,6 +46,44 @@ class Feedback(Base):
     shop = relationship("Shop", back_populates="feedbacks")
     drafts = relationship("FeedbackDraft", back_populates="feedback", cascade="all,delete-orphan")
 
+    # --- Computed / enriched fields (not persisted) ---
+    # These are populated by API layer (e.g. attaching product card photo URLs).
+
+    @property
+    def nm_id(self) -> int | None:
+        pd = self.product_details or {}
+        v = pd.get("nmId") or pd.get("nmID")
+        try:
+            return int(v) if v is not None else None
+        except Exception:
+            return None
+
+    @property
+    def product_name(self) -> str | None:
+        pd = self.product_details or {}
+        return pd.get("productName")
+
+    @property
+    def supplier_article(self) -> str | None:
+        pd = self.product_details or {}
+        return pd.get("supplierArticle")
+
+    @property
+    def brand_name(self) -> str | None:
+        pd = self.product_details or {}
+        return pd.get("brandName")
+
+    @property
+    def product_image_url(self) -> str | None:
+        return getattr(self, "_product_image_url", None)
+
     __table_args__ = (
         UniqueConstraint("shop_id", "wb_id", name="uq_feedbacks_shop_wb"),
     )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+

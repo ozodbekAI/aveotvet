@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, and_, asc, update
+from sqlalchemy import select, and_, asc, update, func, cast, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.job import Job
@@ -48,3 +48,24 @@ class JobRepo:
             if retry_in_seconds:
                 job.run_at = datetime.now(timezone.utc) + timedelta(seconds=retry_in_seconds)
         await self.session.flush()
+
+    async def exists_pending_for_shop(
+        self,
+        job_type: str,
+        shop_id: int,
+        *,
+        max_age_minutes: int = 180,
+    ) -> bool:
+        """Return True if there is a queued/running job of given type for this shop.
+
+        We look only at reasonably recent jobs to avoid a permanently stuck old record blocking scheduling.
+        """
+        since = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+        q = select(func.count()).select_from(Job).where(
+            Job.type == job_type,
+            Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
+            Job.created_at >= since,
+            cast(Job.payload["shop_id"].astext, Integer) == int(shop_id),
+        )
+        cnt = (await self.session.execute(q)).scalar_one()
+        return int(cnt) > 0

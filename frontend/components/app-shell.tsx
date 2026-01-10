@@ -1,18 +1,20 @@
 "use client"
 
+import type React from "react"
+
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import Sidebar from "@/components/layout/sidebar"
 import { ShopProvider } from "@/components/shop-context"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Separator } from "@/components/ui/separator"
 
 import { createShop, listShops } from "@/lib/api"
 import { clearAuthToken } from "@/lib/auth"
+import { LogOut, RefreshCw } from "lucide-react"
 
 type Shop = { id: number; name: string }
 
@@ -117,23 +119,40 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="h-screen flex bg-gray-50">
-      <Sidebar shops={shops} selectedShopId={selectedShopId} onShopChange={handleShopChange} onAddShop={() => setAddOpen(true)} />
+    <div className="h-screen flex bg-background">
+      <Sidebar
+        shops={shops}
+        selectedShopId={selectedShopId}
+        onShopChange={handleShopChange}
+        onAddShop={() => setAddOpen(true)}
+      />
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="bg-white border-b border-gray-200 px-6 py-4">
+        <header className="bg-card border-b border-border px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="min-w-0">
-              <div className="text-sm text-gray-500">Текущий магазин</div>
-              <div className="font-semibold text-gray-900 truncate">
+              <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
+                Текущий магазин
+              </div>
+              <div className="font-semibold text-foreground truncate text-lg">
                 {loadingShops ? "Загрузка…" : selectedShop?.name || "Магазин не выбран"}
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" onClick={() => router.refresh()}>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                onClick={() => router.refresh()}
+                className="border-border text-foreground hover:bg-secondary"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
                 Обновить
               </Button>
-              <Button variant="destructive" onClick={handleLogout}>
+              <Button
+                variant="destructive"
+                onClick={handleLogout}
+                className="bg-destructive/20 text-destructive hover:bg-destructive/30"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
                 Выйти
               </Button>
             </div>
@@ -142,45 +161,70 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         <ShopProvider value={{ shopId: selectedShopId, setShopId: setSelectedShopId }}>
           <main className="flex-1 overflow-auto p-6">
-          {/* Pages rely on shop_id; enforce selection early */}
-          {!selectedShopId ? (
-            <div className="max-w-xl">
-              <div className="text-lg font-semibold text-gray-900 mb-2">Магазины отсутствуют</div>
-              <div className="text-sm text-gray-600 mb-4">
-                Создайте магазин и добавьте токен Wildberries, чтобы начать синхронизацию отзывов, вопросов и чатов.
+            {/* Pages rely on shop_id; enforce selection early */}
+            {!selectedShopId ? (
+              <div className="max-w-xl">
+                <div className="text-2xl font-bold text-foreground mb-2">Магазины отсутствуют</div>
+                <div className="text-sm text-muted-foreground mb-4">
+                  Создайте магазин и добавьте токен Wildberries, чтобы начать синхронизацию отзывов, вопросов и чатов.
+                </div>
+                <Button onClick={() => setAddOpen(true)} className="bg-primary hover:bg-primary/90">
+                  Создать первый магазин
+                </Button>
               </div>
-              <Button onClick={() => setAddOpen(true)}>Создать первый магазин</Button>
-            </div>
-          ) : (
-            <>{children}</>
-          )}
+            ) : (
+              <>{children}</>
+            )}
           </main>
         </ShopProvider>
       </div>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent>
+        <DialogContent className="bg-card border-border">
           <DialogHeader>
-            <DialogTitle>Добавить магазин</DialogTitle>
+            <DialogTitle className="text-foreground">Добавить магазин</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="shop_name">Название</Label>
-              <Input id="shop_name" value={newShopName} onChange={(e) => setNewShopName(e.target.value)} placeholder="Мой магазин WB" />
+              <Label htmlFor="shop_name" className="text-foreground">
+                Название
+              </Label>
+              <Input
+                id="shop_name"
+                value={newShopName}
+                onChange={(e) => setNewShopName(e.target.value)}
+                placeholder="Мой магазин WB"
+                className="mt-2 bg-input border-border text-foreground placeholder:text-muted-foreground"
+              />
             </div>
             <div>
-              <Label htmlFor="wb_token">WB токен</Label>
-              <Input id="wb_token" value={newShopToken} onChange={(e) => setNewShopToken(e.target.value)} placeholder="..." />
-              <div className="text-xs text-gray-500 mt-1">Хранится в backend и используется для синхронизации отзывов, вопросов и чатов.</div>
+              <Label htmlFor="wb_token" className="text-foreground">
+                WB токен
+              </Label>
+              <Input
+                id="wb_token"
+                value={newShopToken}
+                onChange={(e) => setNewShopToken(e.target.value)}
+                placeholder="..."
+                className="mt-2 bg-input border-border text-foreground placeholder:text-muted-foreground"
+              />
+              <div className="text-xs text-muted-foreground mt-1">
+                Хранится в backend и используется для синхронизации отзывов, вопросов и чатов.
+              </div>
             </div>
 
-            {createError ? <div className="text-sm text-red-600">{createError}</div> : null}
+            {createError ? <div className="text-sm text-destructive">{createError}</div> : null}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddOpen(false)} disabled={creatingShop}>
+            <Button
+              variant="outline"
+              onClick={() => setAddOpen(false)}
+              disabled={creatingShop}
+              className="border-border text-foreground hover:bg-secondary"
+            >
               Отмена
             </Button>
-            <Button onClick={handleCreateShop} disabled={creatingShop}>
+            <Button onClick={handleCreateShop} disabled={creatingShop} className="bg-primary hover:bg-primary/90">
               {creatingShop ? "Создание…" : "Создать"}
             </Button>
           </DialogFooter>

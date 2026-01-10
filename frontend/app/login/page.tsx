@@ -9,7 +9,7 @@ export default function LoginPage() {
   return (
     <LoginForm
       onSuccess={() => {
-        router.push("/feedbacks")
+        router.push("/dashboard")
         router.refresh()
       }}
     />

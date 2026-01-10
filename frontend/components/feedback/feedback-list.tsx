@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { RefreshCw, Search } from "lucide-react"
 import FeedbackDetail from "./feedback-detail"
+import { listFeedbacks } from "@/lib/api"
 
 interface FeedbackItem {
   wb_id: string
@@ -31,9 +32,7 @@ export default function FeedbackList({ shopId, token }: FeedbackListProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [filterAnswered, setFilterAnswered] = useState<boolean | null>(null)
   const [isSyncing, setIsSyncing] = useState(false)
-  const [jobId, setJobId] = useState<number | null>(null)
 
-  // Load feedbacks on mount
   useEffect(() => {
     loadFeedbacks()
   }, [filterAnswered, searchQuery])
@@ -41,18 +40,11 @@ export default function FeedbackList({ shopId, token }: FeedbackListProps) {
   const loadFeedbacks = async () => {
     setIsLoading(true)
     try {
-      const params = new URLSearchParams()
-      if (filterAnswered !== null) params.append("is_answered", String(filterAnswered))
-      if (searchQuery) params.append("q", searchQuery)
-
-      const res = await fetch(`/api/feedbacks/${shopId}?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const data = await listFeedbacks(shopId, {
+        is_answered: filterAnswered,
+        q: searchQuery,
       })
-
-      if (res.ok) {
-        const data = await res.json()
-        setFeedbacks(Array.isArray(data) ? data : [])
-      }
+      setFeedbacks(Array.isArray(data) ? data : [])
     } catch (err) {
       console.error("Failed to load feedbacks:", err)
     } finally {
@@ -61,56 +53,22 @@ export default function FeedbackList({ shopId, token }: FeedbackListProps) {
   }
 
   const handleSync = async () => {
+    // Avto-sync backend worker orqali ketadi. Bu tugma faqat DB’dan qayta yuklaydi.
     setIsSyncing(true)
     try {
-      const res = await fetch(`/api/feedbacks/${shopId}/sync`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          is_answered: null,
-          date_from_unix: 0,
-          date_to_unix: 0,
-          order: "dateDesc",
-          take: 100,
-          skip: 0,
-        }),
-      })
-
-      if (res.ok) {
-        const data = await res.json()
-        setJobId(data.job_id)
-        pollJobStatus(data.job_id)
-      }
-    } catch (err) {
-      console.error("Sync failed:", err)
+      await fetchFeedbacks()
+    } finally {
+      setIsSyncing(false)
     }
   }
-
-  const pollJobStatus = async (id: number) => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/jobs/${id}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-
-        if (res.ok) {
-          const job = await res.json()
-          if (job.status === "done") {
-            clearInterval(interval)
-            setIsSyncing(false)
-            loadFeedbacks()
-          } else if (job.status === "failed") {
-            clearInterval(interval)
-            setIsSyncing(false)
-          }
+        } catch (err) {
+          clearInterval(interval)
         }
-      } catch (err) {
-        console.error("Job poll failed:", err)
-      }
-    }, 2000)
+      }, 2000)
+    } catch (err) {
+      console.error("Sync failed:", err)
+      setIsSyncing(false)
+    }
   }
 
   if (selectedFeedback) {
@@ -127,7 +85,6 @@ export default function FeedbackList({ shopId, token }: FeedbackListProps) {
 
   return (
     <div className="p-8">
-      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Feedbacks</h1>
@@ -139,7 +96,6 @@ export default function FeedbackList({ shopId, token }: FeedbackListProps) {
         </Button>
       </div>
 
-      {/* Filters */}
       <div className="flex gap-4 mb-6">
         <div className="flex-1 relative">
           <Search className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
@@ -164,7 +120,6 @@ export default function FeedbackList({ shopId, token }: FeedbackListProps) {
         </Button>
       </div>
 
-      {/* Feedbacks List */}
       <div className="space-y-3">
         {isLoading ? (
           <Card className="p-8 text-center text-muted-foreground">Loading feedbacks...</Card>

@@ -17,6 +17,7 @@ target_metadata = Base.metadata
 
 
 def _sync_db_url() -> str:
+    
     url = settings.DATABASE_URL
     if "+asyncpg" in url:
         url = url.replace("postgresql+asyncpg", "postgresql+psycopg2")

@@ -11,7 +11,7 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import { getSettings, updateSettings, getShop } from "@/lib/api";
+import { getSettings, updateSettings, getShop, getToneOptions, getShopBrands } from "@/lib/api";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -86,7 +86,7 @@ type Settings = {
   config: Record<string, any>;
 };
 
-const TONE_OPTIONS: Array<{ value: string; label: string; hint?: string }> = [
+const FALLBACK_TONE_OPTIONS: Array<{ value: string; label: string; hint?: string }> = [
   { value: "none", label: "Без тональности", hint: "Настройка по умолчанию. Тональность отключена." },
   { value: "business", label: "Деловая", hint: "Подходит для официальных ответов." },
   { value: "joking", label: "Шутливая", hint: "Разряжает обстановку." },
@@ -261,9 +261,29 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
   const [shopName, setShopName] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+
+  const [toneOptions, setToneOptions] = React.useState(FALLBACK_TONE_OPTIONS);
+
+  React.useEffect(() => {
+    let mounted = true;
+    ;(async () => {
+      try {
+        const opts = await getToneOptions();
+        if (mounted && Array.isArray(opts) && opts.length) setToneOptions(opts);
+      } catch {
+        // keep fallback
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
   const [error, setError] = React.useState<string | null>(null);
 
   const [draft, setDraft] = React.useState<Settings | null>(null);
+
+  // Brands (from WB analytics via backend)
+  const [brands, setBrands] = React.useState<string[]>([]);
 
   // Signature UI state
   const [signatureOpen, setSignatureOpen] = React.useState(false);
@@ -278,12 +298,24 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
     setLoading(true);
     setError(null);
     try {
-      const [s, shop] = await Promise.all([
+      const [s, shop, br] = await Promise.all([
         getSettings(shopId) as Promise<Settings>,
         getShop(shopId).catch(() => null as any),
+        getShopBrands(shopId).catch(() => ({ data: [] as string[] })),
       ]);
       
       setShopName(shop?.name ?? null);
+
+      // Normalize brand list (unique + sorted, keep deterministic)
+      const rawBrands = Array.isArray(br?.data) ? br.data : [];
+      const uniq = Array.from(
+        new Map(rawBrands.filter((x) => typeof x === "string" && x.trim()).map((x) => [x.trim().toLowerCase(), x.trim()])).values()
+      );
+      uniq.sort((a, b) => a.localeCompare(b, "ru", { sensitivity: "base" }));
+      setBrands(uniq);
+
+      // Map lowercased brand -> canonical brand (from WB)
+      const brandMap = new Map<string, string>(uniq.map((b) => [b.toLowerCase(), b]));
       
       // Barcha fieldlarni normalize qilish
       const normalized: Settings = {
@@ -322,7 +354,20 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
         questions_auto_publish: coerceBool(s.questions_auto_publish) ?? false,
         
         // Signatures
-        signatures: Array.isArray(s.signatures) ? s.signatures : [],
+        // Normalize existing signature brands so old values like "avemod" become "Avemod"
+        signatures: Array.isArray(s.signatures)
+          ? (s.signatures as any[]).map((it) => {
+              if (typeof it === "string") return it;
+              if (it && typeof it === "object") {
+                const rawBrand = typeof it.brand === "string" ? it.brand.trim() : "all";
+                if (rawBrand && rawBrand !== "all") {
+                  const canon = brandMap.get(rawBrand.toLowerCase());
+                  return { ...it, brand: canon ?? rawBrand };
+                }
+              }
+              return it;
+            })
+          : [],
         
         // Config
         config: s.config || {},
@@ -704,7 +749,17 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Все бренды</SelectItem>
-                      <SelectItem value="avemod">AVEMOD</SelectItem>
+                      {brands.length ? (
+                        brands.map((b) => (
+                          <SelectItem key={b} value={b}>
+                            {b}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="__none" disabled>
+                          Нет брендов (проверьте WB-токен)
+                        </SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -797,7 +852,17 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Для всех брендов</SelectItem>
-                        <SelectItem value="avemod">AVEMOD</SelectItem>
+                        {brands.length ? (
+                          brands.map((b) => (
+                            <SelectItem key={b} value={b}>
+                              {b}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem value="__none" disabled>
+                            Нет брендов (проверьте WB-токен)
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -982,7 +1047,7 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {TONE_OPTIONS.map((t) => (
+                        {toneOptions.map((t) => (
                           <SelectItem key={t.value} value={t.value}>
                             {t.label}
                           </SelectItem>
@@ -998,7 +1063,7 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {TONE_OPTIONS.map((t) => (
+                        {toneOptions.map((t) => (
                           <SelectItem key={t.value} value={t.value}>
                             {t.label}
                           </SelectItem>
@@ -1014,7 +1079,7 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {TONE_OPTIONS.map((t) => (
+                        {toneOptions.map((t) => (
                           <SelectItem key={t.value} value={t.value}>
                             {t.label}
                           </SelectItem>
@@ -1030,7 +1095,7 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {TONE_OPTIONS.map((t) => (
+                        {toneOptions.map((t) => (
                           <SelectItem key={t.value} value={t.value}>
                             {t.label}
                           </SelectItem>

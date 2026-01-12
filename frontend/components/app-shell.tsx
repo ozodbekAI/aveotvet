@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
-import { createShop, listShops } from "@/lib/api"
+import { createShop, listShops, getMe } from "@/lib/api"
 import { clearAuthToken } from "@/lib/auth"
 import { LogOut, RefreshCw } from "lucide-react"
 
@@ -26,6 +26,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [shops, setShops] = useState<Shop[]>([])
   const [selectedShopId, setSelectedShopId] = useState<number | null>(null)
   const [loadingShops, setLoadingShops] = useState(false)
+
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
 
   // Add shop dialog
   const [addOpen, setAddOpen] = useState(false)
@@ -54,6 +56,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     let mounted = true
     ;(async () => {
       try {
+        // Load current user role (optional). If backend is down/unauthorized, ignore.
+        try {
+          const me = await getMe()
+          if (mounted) setIsSuperAdmin(me?.role === "super_admin")
+        } catch {
+          // ignore
+        }
         setLoadingShops(true)
         const data = await listShops()
         if (!mounted) return
@@ -125,6 +134,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         selectedShopId={selectedShopId}
         onShopChange={handleShopChange}
         onAddShop={() => setAddOpen(true)}
+        isSuperAdmin={isSuperAdmin}
       />
 
       <div className="flex-1 flex flex-col min-w-0">

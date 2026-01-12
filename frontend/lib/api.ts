@@ -91,6 +91,64 @@ export async function register(email: string, password: string) {
   })
 }
 
+// Prompts (global)
+export async function getToneOptions() {
+  return apiCall<Array<{ value: string; label: string; hint?: string }>>("/api/prompts/tone-options")
+}
+
+export async function getMe() {
+  return apiCall<{ id: number; email: string; role: string }>("/api/auth/me")
+}
+
+// Admin (super_admin)
+export async function adminListUsers() {
+  return apiCall<Array<{ id: number; email: string; role: string; is_active: boolean }>>("/api/admin/users")
+}
+
+export async function adminSetUserRole(userId: number, role: string) {
+  return apiCall(`/api/admin/users/${userId}/role`, {
+    method: "PUT",
+    body: JSON.stringify({ role }),
+  })
+}
+
+export async function adminGetPrompts() {
+  return apiCall<any>("/api/admin/prompts")
+}
+
+export async function adminUpdatePrompts(payload: any) {
+  return apiCall<any>("/api/admin/prompts", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function adminListTones() {
+  return apiCall<Array<{ id: number; code: string; label: string; hint?: string | null; instruction?: string | null; sort_order: number; is_active: boolean }>>(
+    "/api/admin/tones"
+  )
+}
+
+export async function adminCreateTone(payload: any) {
+  return apiCall("/api/admin/tones", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function adminUpdateTone(toneId: number, payload: any) {
+  return apiCall(`/api/admin/tones/${toneId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function adminDeleteTone(toneId: number) {
+  return apiCall(`/api/admin/tones/${toneId}`, {
+    method: "DELETE",
+  })
+}
+
 // Shops
 export async function listShops() {
   return apiCall("/api/shops")
@@ -98,6 +156,11 @@ export async function listShops() {
 
 export async function getShop(shopId: number) {
   return apiCall(`/api/shops/${shopId}`)
+}
+
+// Canonical brands (WB analytics API proxied by backend)
+export async function getShopBrands(shopId: number) {
+  return apiCall<{ data: string[]; cached?: boolean }>(`/api/shops/${shopId}/brands`)
 }
 
 // createShop accepts either (name, wbToken) or an object {name, wb_token}
@@ -145,7 +208,75 @@ export async function getFeedback(shopId: number, wbId: string) {
 export async function syncFeedbacks(shopId: number) {
   return apiCall(`/api/feedbacks/${shopId}/sync`, {
     method: "POST",
+    // Backend expects SyncRequest body; keep defaults.
+    body: JSON.stringify({}),
   })
+}
+
+// Dashboard
+export type DashboardTabKey = "feedbacks" | "questions" | "chats"
+
+export type DashboardMeta = {
+  shop_ids: number[]
+  range_days: number
+  date_from_iso: string
+  date_to_iso: string
+}
+
+export type DashboardKpis = {
+  total: number
+  pending: number
+  unanswered: number
+  answered: number
+  avg_rating?: number | null
+  positive_share?: number | null
+}
+
+export type DashboardLinePoint = { d: string; v: number }
+
+export type DashboardLine = {
+  data: DashboardLinePoint[]
+  period_text: string
+}
+
+export type DashboardTopItem = {
+  title: string
+  brand?: string | null
+  count: number
+}
+
+export type DashboardTopBlock = {
+  primary: DashboardTopItem[]
+  secondary: DashboardTopItem[]
+}
+
+export type DashboardOut = {
+  meta: DashboardMeta
+  kpis: DashboardKpis
+  line: DashboardLine
+  top: DashboardTopBlock
+}
+
+export type DashboardSyncOut = {
+  queued: boolean
+  job_id?: number
+  job_ids?: number[]
+}
+
+export async function getDashboard(tab: DashboardTabKey, params?: { shop_id?: number | null; period?: string }) {
+  const qs = new URLSearchParams()
+  if (params?.shop_id) qs.set("shop_id", String(params.shop_id))
+  if (params?.period) qs.set("period", String(params.period))
+  const q = qs.toString()
+  return apiCall<DashboardOut>(`/api/dashboard/${tab}${q ? `?${q}` : ""}`)
+}
+
+export async function syncDashboard(tab: DashboardTabKey, params?: { shop_id?: number | null; period?: string }) {
+  const qs = new URLSearchParams()
+  if (params?.shop_id) qs.set("shop_id", String(params.shop_id))
+  if (params?.period) qs.set("period", String(params.period))
+  const q = qs.toString()
+  return apiCall<DashboardSyncOut>(`/api/dashboard/${tab}/sync${q ? `?${q}` : ""}`, { method: "POST" })
 }
 export async function generateFeedbackDraft(shopId: number, wbId: string) {
   return apiCall(`/api/feedbacks/${shopId}/${wbId}/draft`, {

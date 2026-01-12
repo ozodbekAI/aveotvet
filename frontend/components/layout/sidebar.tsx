@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
-import { MessageSquare, HelpCircle, Settings, MessageCircle, FileText, PlusCircle, Home } from "lucide-react"
+import { MessageSquare, HelpCircle, Settings, MessageCircle, FileText, PlusCircle, Home, Shield, Users } from "lucide-react"
 
 interface Shop {
   id: number
@@ -18,10 +18,12 @@ interface SidebarProps {
   selectedShopId: number | null
   onShopChange: (shopId: number) => void
   onAddShop: () => void
+  isSuperAdmin?: boolean
 }
 
-export default function Sidebar({ shops, selectedShopId, onShopChange, onAddShop }: SidebarProps) {
+export default function Sidebar({ shops, selectedShopId, onShopChange, onAddShop, isSuperAdmin }: SidebarProps) {
   const pathname = usePathname()
+  const isDashboard = pathname === "/dashboard" || pathname.startsWith("/dashboard/")
 
   const nav = [
     { href: "/dashboard", label: "Главная", icon: Home },
@@ -31,6 +33,11 @@ export default function Sidebar({ shops, selectedShopId, onShopChange, onAddShop
     { href: "/chat", label: "Чаты", icon: MessageCircle },
     { href: "/settings", label: "Настройки", icon: Settings },
   ]
+
+  if (isSuperAdmin) {
+    nav.push({ href: "/admin/prompts", label: "Промпты", icon: Shield })
+    nav.push({ href: "/admin/users", label: "Пользователи", icon: Users })
+  }
 
   return (
     <div className="flex h-full w-64 flex-col bg-sidebar border-r border-sidebar-border">
@@ -50,22 +57,29 @@ export default function Sidebar({ shops, selectedShopId, onShopChange, onAddShop
             <PlusCircle className="h-4 w-4" />
           </Button>
         </div>
-        <Select
-          value={selectedShopId ? selectedShopId.toString() : ""}
-          onValueChange={(value) => onShopChange(Number.parseInt(value, 10))}
-          disabled={shops.length === 0}
-        >
-          <SelectTrigger className="w-full bg-input border-border text-foreground">
-            <SelectValue placeholder={shops.length ? "Выберите магазин" : "Магазинов нет"} />
-          </SelectTrigger>
-          <SelectContent className="bg-card border-border">
-            {shops.map((shop) => (
-              <SelectItem key={shop.id} value={shop.id.toString()} className="text-foreground">
-                {shop.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+
+        {isDashboard ? (
+          <div className="text-xs text-muted-foreground leading-snug">
+            Выбор магазина выполняется на дашборде.
+          </div>
+        ) : (
+          <Select
+            value={selectedShopId ? selectedShopId.toString() : ""}
+            onValueChange={(value) => onShopChange(Number.parseInt(value, 10))}
+            disabled={shops.length === 0}
+          >
+            <SelectTrigger className="w-full bg-input border-border text-foreground">
+              <SelectValue placeholder={shops.length ? "Выберите магазин" : "Магазинов нет"} />
+            </SelectTrigger>
+            <SelectContent className="bg-card border-border">
+              {shops.map((shop) => (
+                <SelectItem key={shop.id} value={shop.id.toString()} className="text-foreground">
+                  {shop.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       <Separator className="bg-sidebar-border" />

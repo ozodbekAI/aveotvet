@@ -1,16 +1,5 @@
 import { getAuthToken } from "@/lib/auth"
 
-/**
- * Backend base URL.
- *
- * Recommended setup (dev):
- *  - Leave NEXT_PUBLIC_API_URL empty
- *  - Run backend on http://127.0.0.1:8000
- *  - next.config.mjs rewrites /api/* -> backend
- *
- * Production setup:
- *  - Set NEXT_PUBLIC_API_URL to your backend origin (e.g. https://api.example.com)
- */
 const API_BASE = "https://aveotvet.ozodbek-akramov.uz/api"
 
 export async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {

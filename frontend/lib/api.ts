@@ -11,7 +11,7 @@ import { getAuthToken } from "@/lib/auth"
  * Production setup:
  *  - Set NEXT_PUBLIC_API_URL to your backend origin (e.g. https://api.example.com)
  */
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "")
+const API_BASE = "https://aveotvet.ozodbek-akramov.uz/api"
 
 export async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== "undefined" ? getAuthToken() : null

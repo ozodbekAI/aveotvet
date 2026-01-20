@@ -33,6 +33,7 @@ class SettingsOut(BaseModel):
     reply_mode: str
     auto_draft: bool
     auto_publish: bool
+    auto_draft_limit_per_sync: int
 
     rating_mode_map: dict
     min_rating_to_autopublish: int
@@ -82,6 +83,9 @@ class SettingsUpdate(BaseModel):
     reply_mode: str | None = Field(default=None, description="manual | semi | auto")
     auto_draft: bool | None = None
     auto_publish: bool | None = None
+
+    # Limit for auto-drafting on each sync cycle. 0 = unlimited.
+    auto_draft_limit_per_sync: int | None = Field(default=None, ge=0, le=5000)
     
     rating_mode_map: dict | None = None
     min_rating_to_autopublish: int | None = Field(default=None, ge=1, le=5)

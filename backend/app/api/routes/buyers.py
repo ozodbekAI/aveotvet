@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user
@@ -16,13 +16,14 @@ router = APIRouter()
 @router.get("/{shop_id}", response_model=list[BuyerListItem])
 async def buyers_list(
     shop_id: int,
+    request: Request,
     q: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.viewer.value)).shop
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     # Merge buyers stats from feedbacks + questions (Otveto-like "Threads" view)
     fb_rows, _ = await FeedbackRepo(db).buyers_agg(shop_id=shop_id, q=q, limit=limit, offset=offset)
@@ -58,12 +59,13 @@ async def buyers_list(
 async def buyer_thread(
     shop_id: int,
     user_name: str,
+    request: Request,
     limit: int = Query(default=200, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.viewer.value)).shop
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     fb_rows, _ = await FeedbackRepo(db).list(shop_id=shop_id, is_answered=None, q=None, user_name=user_name, limit=limit, offset=0)
     q_rows, _ = await QuestionRepo(db).list(shop_id=shop_id, is_answered=None, q=None, user_name=user_name, limit=limit, offset=0)

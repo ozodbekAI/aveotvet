@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, get_current_user
@@ -10,6 +10,7 @@ from app.repos.shop_repo import ShopRepo
 from app.repos.job_repo import JobRepo
 from app.repos.question_repo import QuestionRepo
 from app.repos.question_draft_repo import QuestionDraftRepo
+from app.repos.shop_billing_repo import ShopBillingRepo
 from app.models.enums import JobType
 from app.schemas.question import (
     QuestionListItem,
@@ -19,9 +20,11 @@ from app.schemas.question import (
 )
 from app.services.openai_client import OpenAIService
 from app.services.question_drafting import generate_question_draft_text
+from app.services.gpt_accounting import record_gpt_usage
 from app.services.prompt_store import get_global_bundle
 from app.services.wb_client import WBClient
 from app.core.crypto import decrypt_secret
+from app.models import settings
 
 
 router = APIRouter()
@@ -34,8 +37,8 @@ def _get_shop_or_404(shop):
 
 
 @router.post("/{shop_id}/sync")
-async def request_sync(shop_id: int, payload: QuestionSyncRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.manager.value)).shop
+async def request_sync(shop_id: int,request: Request, payload: QuestionSyncRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     job = await JobRepo(db).enqueue(
         type=JobType.sync_questions.value,
@@ -55,6 +58,7 @@ async def request_sync(shop_id: int, payload: QuestionSyncRequest, db: AsyncSess
 
 @router.get("/{shop_id}", response_model=list[QuestionListItem])
 async def list_questions(
+    request: Request,
     shop_id: int,
     is_answered: bool | None = Query(default=None),
     q: str | None = Query(default=None),
@@ -64,7 +68,7 @@ async def list_questions(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.viewer.value)).shop
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     rows, _total = await QuestionRepo(db).list(
         shop_id=shop_id,
@@ -78,8 +82,8 @@ async def list_questions(
 
 
 @router.get("/{shop_id}/{wb_id}", response_model=QuestionDetail)
-async def get_question(shop_id: int, wb_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.viewer.value)).shop
+async def get_question(shop_id: int, wb_id: str, request: Request, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     q = await QuestionRepo(db).get_by_wb_id(shop_id, wb_id)
     if not q:
@@ -88,8 +92,8 @@ async def get_question(shop_id: int, wb_id: str, db: AsyncSession = Depends(get_
 
 
 @router.post("/{shop_id}/{wb_id}/view")
-async def mark_viewed(shop_id: int, wb_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+async def mark_viewed(shop_id: int, wb_id: str, request: Request, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     token = decrypt_secret(shop.wb_token_enc)
     wb = WBClient(token=token)
@@ -106,8 +110,8 @@ async def mark_viewed(shop_id: int, wb_id: str, db: AsyncSession = Depends(get_d
 
 
 @router.post("/{shop_id}/{wb_id}/draft")
-async def generate_draft(shop_id: int, wb_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+async def generate_draft(shop_id: int, wb_id: str, request: Request, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     s = await ShopRepo(db).get_settings(shop_id)
     if not s:
@@ -117,18 +121,51 @@ async def generate_draft(shop_id: int, wb_id: str, db: AsyncSession = Depends(ge
     if not q:
         raise HTTPException(status_code=404, detail="Question not found in DB. Run sync first.")
 
+    # Billing: charge credits before spending OpenAI tokens.
+    credits_per_draft = int(getattr(settings, "CREDITS_PER_DRAFT", 1) or 1)
+    charged = False
+    if credits_per_draft > 0:
+        charged = await ShopBillingRepo(db).try_charge(
+            shop_id,
+            amount=credits_per_draft,
+            reason="question_draft_api",
+            meta={"shop_id": shop_id, "question_wb_id": wb_id, "question_id": q.id},
+        )
+        if not charged:
+            raise HTTPException(status_code=402, detail="Insufficient credits")
+
     openai = OpenAIService()
     bundle = await get_global_bundle(db)
-    text, model, response_id = await generate_question_draft_text(openai, q, s, bundle=bundle)
+    try:
+        text, model, response_id, prompt_tokens, completion_tokens = await generate_question_draft_text(openai, q, s, bundle=bundle)
+    except Exception:
+        if charged and credits_per_draft > 0:
+            await ShopBillingRepo(db).apply_credits(
+                shop_id,
+                delta=credits_per_draft,
+                reason="refund_question_draft_api_error",
+                meta={"shop_id": shop_id, "question_wb_id": wb_id, "question_id": q.id},
+            )
+            await db.flush()
+        raise
 
     draft = await QuestionDraftRepo(db).create(question_id=q.id, text=text, openai_model=model, openai_response_id=response_id)
+    await record_gpt_usage(
+        db,
+        shop_id=shop_id,
+        model=model,
+        operation_type="question_draft",
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        response_id=response_id,
+    )
     await db.commit()
     return {"draft_id": draft.id, "status": draft.status, "text": draft.text}
 
 
 @router.post("/{shop_id}/{wb_id}/publish")
-async def publish_answer(shop_id: int, wb_id: str, payload: QuestionAnswerRequest | None = None, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+async def publish_answer(shop_id: int, wb_id: str,request: Request, payload: QuestionAnswerRequest | None = None, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     q = await QuestionRepo(db).get_by_wb_id(shop_id, wb_id)
     if not q:
@@ -154,8 +191,8 @@ async def publish_answer(shop_id: int, wb_id: str, payload: QuestionAnswerReques
 
 
 @router.post("/{shop_id}/{wb_id}/reject")
-async def reject_question(shop_id: int, wb_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+async def reject_question(shop_id: int, wb_id: str, request: Request, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     token = decrypt_secret(shop.wb_token_enc)
     wb = WBClient(token=token)

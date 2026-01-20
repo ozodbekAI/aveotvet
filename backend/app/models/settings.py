@@ -15,10 +15,19 @@ class ShopSettings(Base):
 
     auto_sync: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    # Start/Stop switch for AUTO-DRAFTS of REVIEWS only.
+    # IMPORTANT: Sync and other modules (questions/chats/product cards) must continue to work
+    # regardless of this flag.
+    automation_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     reply_mode: Mapped[str] = mapped_column(String(16), default="semi", nullable=False)
 
     auto_draft: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     auto_publish: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Hard cap on number of drafts the system may auto-generate in a single sync cycle.
+    # 0 = unlimited (still limited by available credits and worker throughput).
+    auto_draft_limit_per_sync: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
 
     rating_mode_map: Mapped[dict] = mapped_column(JSONB, default=lambda: {"1":"manual","2":"manual","3":"semi","4":"auto","5":"auto"}, nullable=False)
 
@@ -43,16 +52,15 @@ class ShopSettings(Base):
     chat_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     chat_auto_reply: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Raw JSON for future extensibility (additional prompt params, exclusions, etc.)
     config: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
-    # Sync markers
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    last_feedback_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_questions_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_chat_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    chat_next_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)  # WB events paginator (ms)
+    chat_next_ms: Mapped[int | None] = mapped_column(Integer, nullable=True) 
 
-    # Product cards sync (Content API) - used to attach product photos to feedback list.
     last_cards_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cards_cursor_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cards_cursor_nm_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

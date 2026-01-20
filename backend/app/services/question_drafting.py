@@ -114,7 +114,7 @@ async def generate_question_draft_text(
     question: Question,
     shop_settings: ShopSettings,
     bundle: PromptBundle | None = None,
-) -> tuple[str, str, str | None]:
+) -> tuple[str, str, str | None, int, int]:
     pd = question.product_details or {}
     brand = pd.get("brandName")
     brand = brand.strip() if isinstance(brand, str) and brand.strip() else None
@@ -127,7 +127,7 @@ async def generate_question_draft_text(
         instructions=instructions,
         input_text=input_text,
     )
-    return sanitize_output(res.text), res.model, res.response_id
+    return sanitize_output(res.text), res.model, res.response_id, int(res.prompt_tokens), int(res.completion_tokens)
 
 
 # Backward-compatible alias (older routes/services used this name)
@@ -136,5 +136,6 @@ async def generate_question_draft(
     question: Question,
     shop_settings: ShopSettings,
     bundle: PromptBundle | None = None,
-) -> tuple[str, str, str | None]:
-    return await generate_question_draft_text(openai, question, shop_settings, bundle=bundle)
+) -> tuple[str, str, str | None, int, int]:
+    text, model, response_id, pt, ct = await generate_question_draft_text(openai, question, shop_settings, bundle=bundle)
+    return text, model, response_id, pt, ct

@@ -71,7 +71,7 @@ async def generate_chat_reply(
     last_buyer_message: str,
     context: dict | None = None,
     bundle: PromptBundle | None = None,
-) -> tuple[str, str, str | None]:
+) -> tuple[str, str, str | None, int, int]:
     instructions = build_chat_instructions(shop_settings, bundle=bundle)
 
     ctx_lines: list[str] = []
@@ -86,4 +86,4 @@ async def generate_chat_reply(
     input_text = "\n".join(["Buyer message:", last_buyer_message] + ([""] + ctx_lines if ctx_lines else []))
 
     res = await openai.generate_text(model=settings.OPENAI_MODEL, instructions=instructions, input_text=input_text)
-    return sanitize(res.text), res.model, res.response_id
+    return sanitize(res.text), res.model, res.response_id, int(res.prompt_tokens), int(res.completion_tokens)

@@ -32,7 +32,8 @@ class FeedbackDetail(FeedbackListItem):
 
 
 class SyncRequest(BaseModel):
-    is_answered: bool = False
+    # None means "all" (both answered and unanswered)
+    is_answered: bool | None = None
     date_from_unix: int | None = None
     date_to_unix: int | None = None
     order: str = "dateDesc"
@@ -48,3 +49,13 @@ class DraftCreateResponse(BaseModel):
     draft_id: int
     status: str
     text: str
+
+
+class BulkDraftRequest(BaseModel):
+    limit: int = 30
+
+
+class BulkDraftResponse(BaseModel):
+    queued: int
+    skipped_existing: int
+    limited_by_balance: bool

@@ -11,7 +11,7 @@ import DraftsTable, { DraftRow } from "@/components/drafts/drafts-table"
 import DraftDetailSheet from "@/components/drafts/draft-detail-sheet"
 import { getDraft, listPendingDrafts } from "@/lib/api"
 
-export default function DraftsModule({ shopId }: { shopId: number }) {
+export default function DraftsModule({ shopId }: { shopId: number | null }) {
   // UI-only filters (like WB): we keep them for the same look, but only `q` is used (local filter)
   const [q, setQ] = useState("")
   const [period, setPeriod] = useState("14d")
@@ -79,6 +79,7 @@ export default function DraftsModule({ shopId }: { shopId: number }) {
   }, [q, rows])
 
   async function load(reset = false) {
+    if (!shopId) return
     setIsLoading(true)
     try {
       const currentOffset = reset ? 0 : offset
@@ -125,6 +126,7 @@ export default function DraftsModule({ shopId }: { shopId: number }) {
   }
 
   useEffect(() => {
+    if (!shopId) return
     setOffset(0)
     setHasMore(true)
     load(true)
@@ -137,6 +139,7 @@ export default function DraftsModule({ shopId }: { shopId: number }) {
   }
 
   async function openDetail(draftId: number) {
+    if (!shopId) return
     setActiveId(draftId)
     setDetailOpen(true)
     setDetailLoading(true)
@@ -152,6 +155,18 @@ export default function DraftsModule({ shopId }: { shopId: number }) {
       setDetailLoading(false)
     }
   }
+
+  if (!shopId) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="rounded-xl border border-border bg-card p-8 text-center">
+          <div className="text-lg font-semibold text-foreground">Магазин не выбран</div>
+          <div className="text-sm text-muted-foreground mt-2">Выберите магазин, чтобы работать с черновиками.</div>
+        </div>
+      </div>
+    )
+  }
+
 
   return (
     <div className="space-y-4">

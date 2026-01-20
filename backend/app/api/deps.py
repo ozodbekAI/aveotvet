@@ -34,4 +34,14 @@ async def get_current_user(
     user = await UserRepo(db).get(int(sub))
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User inactive")
+
+    # Session invalidation: token must match current session_version.
+    token_sv = payload.get("sv")
+    try:
+        token_sv_int = int(token_sv) if token_sv is not None else 1
+    except Exception:
+        token_sv_int = 1
+    user_sv = int(getattr(user, "session_version", 1) or 1)
+    if token_sv_int != user_sv:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
     return user

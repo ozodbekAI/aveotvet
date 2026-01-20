@@ -15,6 +15,7 @@ import { getSettings, updateSettings, getShop, getToneOptions, getShopBrands } f
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -28,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   Table,
@@ -52,11 +54,15 @@ type SignatureItem = {
 type Settings = {
   shop_id: number;
 
+  // Master run switch
+  automation_enabled?: boolean;
+
   // Eski fieldlar (legacy, lekin backend kutadi)
   auto_sync?: boolean;
   reply_mode?: string;
   auto_draft?: boolean;
   auto_publish?: boolean;
+  auto_draft_limit_per_sync?: number;
   min_rating_to_autopublish?: number;
   language?: string;
   tone?: string;
@@ -327,6 +333,8 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
         reply_mode: s.reply_mode ?? "semi",
         auto_draft: s.auto_draft ?? true,
         auto_publish: s.auto_publish ?? false,
+        auto_draft_limit_per_sync:
+          typeof (s as any).auto_draft_limit_per_sync === "number" ? (s as any).auto_draft_limit_per_sync : 0,
         min_rating_to_autopublish: s.min_rating_to_autopublish ?? 4,
         language: s.language ?? "ru",
         tone: s.tone ?? "polite",
@@ -399,6 +407,7 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
         reply_mode: draft.reply_mode ?? "semi",
         auto_draft: draft.auto_draft ?? true,
         auto_publish: draft.auto_publish ?? false,
+        auto_draft_limit_per_sync: draft.auto_draft_limit_per_sync ?? 0,
         
         // Rating-based workflow
         rating_mode_map: draft.rating_mode_map,
@@ -648,6 +657,126 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
 
         {/* Reviews */}
         <TabsContent value="reviews" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Синхронизация и лимиты</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-sm font-medium">Старт автогенерации черновиков (Старт/Стоп)</div>
+                  <div className="mt-1 text-sm text-muted-foreground">
+                    Управляет только автогенерацией черновиков по отзывам. Синхронизация отзывов/карточек и другие функции продолжают работать независимо.
+                  </div>
+                </div>
+                <Switch
+                  checked={Boolean(draft?.automation_enabled)}
+                  onCheckedChange={(v) => {
+                    if (v) {
+                      const ok = window.confirm(
+                        "Перед запуском убедитесь, что настройки магазина заполнены корректно (токен WB, язык, тон, подписи и лимиты). Продолжить?"
+                      )
+                      if (!ok) return
+                    }
+                    setDraft((prev) => (prev ? { ...prev, automation_enabled: v } : prev))
+                  }}
+                />
+              </div>
+
+              <Separator />
+
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-sm font-medium">Автосинхронизация</div>
+                  <div className="mt-1 text-sm text-muted-foreground">
+                    Рекомендуется держать включённой. Система будет периодически забирать новые отзывы и вопросы.
+                  </div>
+                </div>
+                <Switch
+                  checked={Boolean(draft?.auto_sync)}
+                  onCheckedChange={(v) => setDraft((prev) => (prev ? { ...prev, auto_sync: v } : prev))}
+                />
+              </div>
+
+              <Separator />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="rounded-xl border p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-medium">Автогенерация черновиков</div>
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        Если включено, ответы будут создаваться автоматически и попадать в «Черновики».
+                      </div>
+                    </div>
+                    <Switch
+                      checked={Boolean(draft?.auto_draft)}
+                      onCheckedChange={(v) => setDraft((prev) => (prev ? { ...prev, auto_draft: v } : prev))}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-xl border p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-sm font-medium">Автопубликация</div>
+                      <div className="mt-1 text-sm text-muted-foreground">
+                        Если включено, ответы могут публиковаться автоматически (в зависимости от оценки).
+                      </div>
+                    </div>
+                    <Switch
+                      checked={Boolean(draft?.auto_publish)}
+                      onCheckedChange={(v) => setDraft((prev) => (prev ? { ...prev, auto_publish: v } : prev))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Лимит автогенерации за 1 синхронизацию</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={5000}
+                    value={draft?.auto_draft_limit_per_sync ?? 0}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      const n = raw === "" ? 0 : Number.parseInt(raw, 10)
+                      const v = Number.isFinite(n) ? Math.max(0, Math.min(5000, n)) : 0
+                      setDraft((prev) => (prev ? { ...prev, auto_draft_limit_per_sync: v } : prev))
+                    }}
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    0 — без ограничений. Пример: 30 — сгенерировать максимум 30 ответов за один цикл.
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Минимальная оценка для автопубликации</Label>
+                  <Select
+                    value={String(draft?.min_rating_to_autopublish ?? 4)}
+                    onValueChange={(v) => setDraft((prev) => (prev ? { ...prev, min_rating_to_autopublish: Number(v) } : prev))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3, 4, 5].map((r) => (
+                        <SelectItem key={r} value={String(r)}>
+                          {r}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="text-xs text-muted-foreground">
+                    Например, 4 — публиковать автоматически только отзывы с оценкой 4–5.
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>Режим ответов на отзывы</CardTitle>

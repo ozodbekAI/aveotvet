@@ -16,7 +16,7 @@ class BuyerListItem(BaseModel):
 
 
 class BuyerThreadItem(BaseModel):
-    item_type: str = "feedback"  # feedback|question
+    item_type: str = "feedback"  
     wb_id: str
     created_date: datetime
     product_valuation: int | None = None

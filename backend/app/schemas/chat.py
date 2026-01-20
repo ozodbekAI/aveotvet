@@ -10,6 +10,12 @@ class ChatSessionOut(BaseModel):
     client_name: str | None = None
     good_card: dict | None = None
     last_message: dict | None = None
+    # Convenience product fields for UI (resolved from cached product_cards by good_card.nmID).
+    nm_id: int | None = None
+    product_title: str | None = None
+    product_brand: str | None = None
+    product_thumb_url: str | None = None
+    unread_count: int = 0
     updated_at: datetime
 
     class Config:
@@ -39,3 +45,13 @@ class ChatDraftOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ChatSessionRowOut(ChatSessionOut):
+    shop_id: int
+    shop_name: str
+
+
+class ChatSessionsPageOut(BaseModel):
+    total: int
+    items: list[ChatSessionRowOut]

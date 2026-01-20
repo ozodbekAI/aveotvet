@@ -30,7 +30,6 @@ class ShopRepo:
         self.session.add(shop)
         await self.session.flush()
 
-        # Ensure owner is also present in membership table (so list_shops works)
         self.session.add(ShopMember(shop_id=shop.id, user_id=owner_user_id, role=ShopMemberRole.owner.value))
         await self.session.flush()
 
@@ -45,8 +44,6 @@ class ShopRepo:
         if s is None:
             return None
 
-        # Inject signatures from dedicated table into settings object for API/UI parity.
-        # Important: use set_committed_value so SQLAlchemy does NOT consider this as a DB update.
         try:
             sigs = await SignatureRepo(self.session).list_active(shop_id=shop_id)
             payload = [

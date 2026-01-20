@@ -1,13 +1,21 @@
-import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
-import { AUTH_COOKIE_NAME } from "@/lib/auth-cookie"
+import { getMeServer, getTokenFromCookie, isAdminRole } from "@/lib/server-backend"
 
 export default async function Home() {
-  const cookieStore = await cookies()
-  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value
+  const token = await getTokenFromCookie()
   if (!token) {
     redirect("/login")
   }
-  redirect("/dashboard")
+
+  const me = await getMeServer(token)
+  if (!me) {
+    redirect("/login")
+  }
+
+  if (isAdminRole(me.role)) {
+    redirect("/admin/dashboard")
+  }
+
+  redirect("/app/dashboard")
 }

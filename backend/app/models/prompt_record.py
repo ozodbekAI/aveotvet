@@ -18,8 +18,6 @@ class PromptRecord(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-
-    # For this project we use ONLY global scope.
     scope: Mapped[str] = mapped_column(String(32), default="global", nullable=False)
 
     key: Mapped[str] = mapped_column(String(64), nullable=False)

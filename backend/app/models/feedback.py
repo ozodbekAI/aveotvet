@@ -28,12 +28,10 @@ class Feedback(Base):
 
     was_viewed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Answer info
     answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     answer_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
     answer_editable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
-    # Rich payloads stored for UI parity
     product_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     photo_links: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     video: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
@@ -46,8 +44,6 @@ class Feedback(Base):
     shop = relationship("Shop", back_populates="feedbacks")
     drafts = relationship("FeedbackDraft", back_populates="feedback", cascade="all,delete-orphan")
 
-    # --- Computed / enriched fields (not persisted) ---
-    # These are populated by API layer (e.g. attaching product card photo URLs).
 
     @property
     def nm_id(self) -> int | None:

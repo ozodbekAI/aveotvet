@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
@@ -35,6 +35,7 @@ async def get_job(job_id: int, db: AsyncSession = Depends(get_db), user=Depends(
 
 @router.get("", response_model=list[JobOut])
 async def list_jobs(
+    request: Request,
     shop_id: int | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -55,6 +56,6 @@ async def list_jobs(
         if shop_id is not None and int(sid) != int(shop_id):
             continue
         access = await get_shop_access(db, user, int(sid))
-        if access and access.at_least(ShopMemberRole.viewer.value):
+        if access and access.at_least(ShopMemberRole.manager.value):
             out.append(j)
     return out

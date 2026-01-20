@@ -23,6 +23,9 @@ class ChatSession(Base):
     good_card: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     last_message: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # WB chat list includes unread counters; we store it to support filtering and UI badges.
+    unread_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 
     __table_args__ = (

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
@@ -12,6 +12,7 @@ from app.repos.feedback_repo import FeedbackRepo
 from app.repos.product_card_repo import ProductCardRepo
 from app.repos.draft_repo import DraftRepo
 from app.repos.job_repo import JobRepo
+from app.repos.shop_billing_repo import ShopBillingRepo
 from app.models.enums import JobType
 from app.schemas.feedback import (
     FeedbackListItem,
@@ -19,9 +20,12 @@ from app.schemas.feedback import (
     SyncRequest,
     AnswerRequest,
     DraftCreateResponse,
+    BulkDraftRequest,
+    BulkDraftResponse,
 )
 from app.services.openai_client import OpenAIService
 from app.services.drafting import generate_draft_text
+from app.services.gpt_accounting import record_gpt_usage
 from app.services.prompt_store import get_global_bundle
 from app.services.wb_client import WBClient
 from app.core.crypto import decrypt_secret
@@ -40,8 +44,8 @@ def _get_shop_or_404(shop):
 
 
 @router.post("/{shop_id}/sync")
-async def request_sync(shop_id: int, payload: SyncRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.manager.value)).shop
+async def request_sync(shop_id: int, payload: SyncRequest,request: Request, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     job = await JobRepo(db).enqueue(
         type=JobType.sync_shop.value,
@@ -59,8 +63,42 @@ async def request_sync(shop_id: int, payload: SyncRequest, db: AsyncSession = De
     return {"queued": True, "job_id": job.id}
 
 
+@router.post("/{shop_id}/bulk/draft", response_model=BulkDraftResponse)
+async def bulk_draft(
+    shop_id: int,
+    request: Request,
+    payload: BulkDraftRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    access = await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)
+
+    requested = int(payload.limit or 0)
+    if requested <= 0:
+        requested = 0
+
+    credits_per_draft = int(getattr(settings, "CREDITS_PER_DRAFT", 1) or 1)
+    available = await ShopBillingRepo(db).get_balance(shop_id)
+    max_by_balance = available // credits_per_draft if credits_per_draft > 0 else requested
+
+    cap = max_by_balance if requested == 0 else min(requested, max_by_balance)
+    limited_by_balance = (requested != 0 and cap < requested)
+
+    if cap <= 0:
+        return BulkDraftResponse(queued=0, skipped_existing=0, limited_by_balance=True)
+
+    fbs = await FeedbackRepo(db).list_unanswered_without_drafts(shop_id=shop_id, limit=cap)
+    job_repo = JobRepo(db)
+    for fb in fbs:
+        await job_repo.enqueue(JobType.generate_draft.value, {"shop_id": shop_id, "feedback_id": fb.id})
+
+    await db.commit()
+    return BulkDraftResponse(queued=len(fbs), skipped_existing=0, limited_by_balance=limited_by_balance)
+
+
 @router.get("/{shop_id}", response_model=list[FeedbackListItem])
 async def list_feedbacks(
+    request: Request,
     shop_id: int,
     response: Response,
     is_answered: bool | None = Query(default=None),
@@ -77,7 +115,7 @@ async def list_feedbacks(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.viewer.value)).shop
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     rows, total = await FeedbackRepo(db).list(
         shop_id=shop_id,
@@ -144,8 +182,8 @@ async def list_feedbacks(
 
 
 @router.get("/{shop_id}/{wb_id}", response_model=FeedbackDetail)
-async def get_feedback(shop_id: int, wb_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.viewer.value)).shop
+async def get_feedback(shop_id: int, wb_id: str, request: Request, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     fb = await FeedbackRepo(db).get_by_wb_id(shop_id, wb_id)
     if not fb:
@@ -167,8 +205,8 @@ async def get_feedback(shop_id: int, wb_id: str, db: AsyncSession = Depends(get_
 
 
 @router.post("/{shop_id}/{wb_id}/draft", response_model=DraftCreateResponse)
-async def generate_draft(shop_id: int, wb_id: str, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+async def generate_draft(shop_id: int, wb_id: str,request: Request, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     s = await ShopRepo(db).get_settings(shop_id)
     if not s:
@@ -178,18 +216,78 @@ async def generate_draft(shop_id: int, wb_id: str, db: AsyncSession = Depends(ge
     if not fb:
         raise HTTPException(status_code=404, detail="Feedback not found in DB. Run sync first.")
 
+    # Billing: charge credits before spending OpenAI tokens.
+    credits_per_draft = int(getattr(settings, "CREDITS_PER_DRAFT", 1) or 1)
+    charged = False
+    if credits_per_draft > 0:
+        charged = await ShopBillingRepo(db).try_charge(
+            shop_id,
+            amount=credits_per_draft,
+            reason="feedback_draft_api",
+            meta={"shop_id": shop_id, "feedback_wb_id": wb_id, "feedback_id": fb.id},
+        )
+        if not charged:
+            raise HTTPException(status_code=402, detail="Insufficient credits")
+
     openai = OpenAIService()
     bundle = await get_global_bundle(db)
-    text, model, response_id = await generate_draft_text(openai, fb, s, bundle=bundle)
+    try:
+        text, model, response_id, prompt_tokens, completion_tokens = await generate_draft_text(openai, fb, s, bundle=bundle)
+    except Exception:
+        if charged and credits_per_draft > 0:
+            await ShopBillingRepo(db).apply_credits(
+                shop_id,
+                delta=credits_per_draft,
+                reason="refund_feedback_draft_api_error",
+                meta={"shop_id": shop_id, "feedback_wb_id": wb_id, "feedback_id": fb.id},
+            )
+            await db.flush()
+        raise
 
     draft = await DraftRepo(db).create(feedback_id=fb.id, text=text, openai_model=model, openai_response_id=response_id)
+
+    # GPT usage accounting (finance dashboard)
+    await record_gpt_usage(
+        db,
+        shop_id=shop_id,
+        model=model,
+        operation_type="review_draft",
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        response_id=response_id,
+    )
     await db.commit()
     return DraftCreateResponse(draft_id=draft.id, status=draft.status, text=draft.text)
 
 
+@router.get("/{shop_id}/{wb_id}/draft/latest", response_model=DraftCreateResponse)
+async def latest_draft(
+    shop_id: int,
+    wb_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """Return the latest draft for a feedback (if any).
+
+    Used by UI to prefill the answer textarea when auto_draft is enabled.
+    """
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
+
+    fb = await FeedbackRepo(db).get_by_wb_id(shop_id, wb_id)
+    if not fb:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+
+    latest = await DraftRepo(db).latest_for_feedback(fb.id)
+    if not latest:
+        raise HTTPException(status_code=404, detail="No draft")
+
+    return DraftCreateResponse(draft_id=latest.id, status=latest.status, text=latest.text)
+
+
 @router.post("/{shop_id}/{wb_id}/publish")
-async def publish_answer(shop_id: int, wb_id: str, payload: AnswerRequest | None = None, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+async def publish_answer(shop_id: int, wb_id: str, request: Request, payload: AnswerRequest | None = None, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     fb = await FeedbackRepo(db).get_by_wb_id(shop_id, wb_id)
     if not fb:
@@ -215,8 +313,8 @@ async def publish_answer(shop_id: int, wb_id: str, payload: AnswerRequest | None
 
 
 @router.post("/{shop_id}/{wb_id}/answer/edit")
-async def edit_answer(shop_id: int, wb_id: str, payload: AnswerRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+async def edit_answer(shop_id: int, wb_id: str, request: Request, payload: AnswerRequest, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
 
     token = decrypt_secret(shop.wb_token_enc)
     wb = WBClient(token=token)
@@ -236,6 +334,7 @@ async def edit_answer(shop_id: int, wb_id: str, payload: AnswerRequest, db: Asyn
 @router.get("/{shop_id}/pins")
 async def pins_list(
     shop_id: int,
+    request: Request,
     state: str | None = Query(default=None, description="pinned|unpinned"),
     pin_on: str | None = Query(default=None, description="nm|imt"),
     nm_id: int | None = Query(default=None),
@@ -247,7 +346,7 @@ async def pins_list(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.viewer.value)).shop
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     token = decrypt_secret(shop.wb_token_enc)
     wb = WBClient(token=token)
     try:
@@ -259,8 +358,8 @@ async def pins_list(
 
 
 @router.get("/{shop_id}/pins/limits")
-async def pins_limits(shop_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.viewer.value)).shop
+async def pins_limits(shop_id: int, request: Request, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     token = decrypt_secret(shop.wb_token_enc)
     wb = WBClient(token=token)
     try:
@@ -271,8 +370,8 @@ async def pins_limits(shop_id: int, db: AsyncSession = Depends(get_db), user=Dep
 
 
 @router.post("/{shop_id}/pins/pin")
-async def pin_feedback(shop_id: int, feedback_id: str, pin_on: str = "imt", db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+async def pin_feedback(shop_id: int, feedback_id: str, request: Request, pin_on: str = "imt", db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     token = decrypt_secret(shop.wb_token_enc)
     wb = WBClient(token=token)
     try:
@@ -282,8 +381,8 @@ async def pin_feedback(shop_id: int, feedback_id: str, pin_on: str = "imt", db: 
 
 
 @router.delete("/{shop_id}/pins/unpin")
-async def unpin_feedback(shop_id: int, pin_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+async def unpin_feedback(shop_id: int, pin_id: int,request: Request, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     token = decrypt_secret(shop.wb_token_enc)
     wb = WBClient(token=token)
     try:

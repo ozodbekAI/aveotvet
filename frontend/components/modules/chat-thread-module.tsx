@@ -192,7 +192,7 @@ export default function ChatThreadModule({ shopId, chatId }: { shopId: number; c
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => router.push("/chat")}
+              onClick={() => router.push("/app/chat")}
               className="gap-2 text-primary hover:bg-primary/10"
             >
               <ArrowLeft className="w-4 h-4" />

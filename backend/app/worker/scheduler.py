@@ -33,10 +33,13 @@ async def scheduler_tick(session: AsyncSession) -> None:
     if not settings.AUTO_SYNC_ENABLED and not settings.CARDS_SYNC_ENABLED:
         return
 
+    # NOTE:
+    # "automation_enabled" (Start/Stop) controls ONLY auto-generation of review drafts.
+    # Sync (reviews/cards) must continue to work regardless of this switch.
     q = (
         select(Shop, ShopSettings)
         .join(ShopSettings, ShopSettings.shop_id == Shop.id)
-        .where(ShopSettings.auto_sync.is_(True))
+        .where(Shop.is_active.is_(True), Shop.is_frozen.is_(False))
     )
     rows = (await session.execute(q)).all()
 
@@ -45,24 +48,30 @@ async def scheduler_tick(session: AsyncSession) -> None:
 
     for shop, st in rows:
         # --- Feedbacks autosync (unanswered only) ---
-        if settings.AUTO_SYNC_ENABLED:
+        if settings.AUTO_SYNC_ENABLED and bool(getattr(st, "auto_sync", True)):
             due = st.last_sync_at is None or (now - st.last_sync_at) >= feedback_interval
             if due and not await job_repo.exists_pending_for_shop(JobType.sync_shop.value, shop.id):
-                # incremental: ask WB from last_sync_at minus small overlap to avoid gaps
+                # Incremental: ask WB from last seen feedback createdDate (minus overlap).
+                # This is more reliable than last_sync_at when jobs get delayed.
                 date_from_unix = None
-                if st.last_sync_at is not None:
-                    date_from_unix = int((st.last_sync_at - timedelta(minutes=5)).timestamp())
+                cursor = getattr(st, "last_feedback_created_at", None)
+                if cursor is not None:
+                    try:
+                        date_from_unix = int((cursor - timedelta(minutes=5)).timestamp())
+                    except Exception:
+                        date_from_unix = None
 
                 await job_repo.enqueue(
                     JobType.sync_shop.value,
                     {
                         "shop_id": shop.id,
                         "is_answered": False,
-                        "take": 500,
+                        "take": int(settings.AUTO_SYNC_TAKE),
                         "skip": 0,
                         "order": "dateDesc",
                         "date_from_unix": date_from_unix,
                         "date_to_unix": None,
+                        "max_total": int(settings.AUTO_SYNC_MAX_TOTAL),
                     },
                 )
                 log.info(

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from sqlalchemy import select, func, and_, or_, desc
+from sqlalchemy import select, func, and_, or_, desc, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.feedback import Feedback
+from app.models.draft import FeedbackDraft
 
 
 class FeedbackRepo:
@@ -92,7 +93,12 @@ class FeedbackRepo:
             cond.append(or_(Feedback.text.is_(None), func.length(func.trim(Feedback.text)) == 0))
 
         # Media presence (photoLinks or video)
-        photo_len = func.coalesce(func.jsonb_array_length(Feedback.photo_links), 0)
+        # NB: In some historical records photo_links may be a scalar JSON value.
+        # jsonb_array_length() throws for scalars, so we guard by jsonb_typeof(...)=array.
+        photo_len = case(
+            (func.jsonb_typeof(Feedback.photo_links) == "array", func.jsonb_array_length(Feedback.photo_links)),
+            else_=0,
+        )
         if has_media is True:
             cond.append(or_(photo_len > 0, Feedback.video.is_not(None)))
         elif has_media is False:
@@ -158,3 +164,17 @@ class FeedbackRepo:
         )
         total = (await self.session.execute(total_q)).scalar_one()
         return rows, total
+
+    async def list_unanswered_without_drafts(self, shop_id: int, *, limit: int) -> list[Feedback]:
+        """Return newest unanswered feedbacks that do not yet have any draft."""
+        q = (
+            select(Feedback)
+            .outerjoin(FeedbackDraft, FeedbackDraft.feedback_id == Feedback.id)
+            .where(Feedback.shop_id == shop_id)
+            .where(Feedback.answer_text.is_(None))
+            .where(FeedbackDraft.id.is_(None))
+            .order_by(desc(Feedback.created_date))
+            .limit(int(limit))
+        )
+        rows = await self.session.execute(q)
+        return list(rows.scalars().all())

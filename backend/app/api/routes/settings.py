@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
@@ -191,8 +191,8 @@ def validate_and_merge_config(existing_config: dict, new_config: dict) -> dict:
 
 
 @router.get("/{shop_id}", response_model=SettingsOut)
-async def get_settings(shop_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    access = await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.manager.value)
+async def get_settings(shop_id: int, request: Request, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    access = await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)
     shop = access.shop
     s = await ShopRepo(db).get_settings(shop_id)
     if not s:
@@ -203,11 +203,13 @@ async def get_settings(shop_id: int, db: AsyncSession = Depends(get_db), user=De
 @router.put("/{shop_id}", response_model=SettingsOut)
 async def update_settings(
     shop_id: int, 
-    payload: SettingsUpdate, 
+    payload: SettingsUpdate,
+    request: Request, 
     db: AsyncSession = Depends(get_db), 
     user=Depends(get_current_user)
 ):
-    access = await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.viewer.value)
+    # Settings are sensitive and should only be editable by managers/owners.
+    access = await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)
     shop = access.shop
 
     s = await ShopRepo(db).get_settings(shop_id)
@@ -215,6 +217,12 @@ async def update_settings(
         raise HTTPException(status_code=404, detail="Settings not found")
 
     data = payload.model_dump(exclude_unset=True)
+
+    # v1 RBAC: "advanced" settings are owner-only
+    if "config" in data and isinstance(data.get("config"), dict):
+        cfg = data.get("config") or {}
+        if "advanced" in cfg and not access.at_least(ShopMemberRole.owner.value):
+            raise HTTPException(status_code=403, detail="Advanced settings are owner-only")
     
     log.info(f"[settings] UPDATE shop_id={shop_id} - received fields: {list(data.keys())}")
 

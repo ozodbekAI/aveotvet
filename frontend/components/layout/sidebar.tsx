@@ -6,45 +6,93 @@ import { usePathname } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
-import { MessageSquare, HelpCircle, Settings, MessageCircle, FileText, PlusCircle, Home, Shield, Users } from "lucide-react"
+import {
+  MessageSquare,
+  HelpCircle,
+  Settings,
+  MessageCircle,
+  FileText,
+  PlusCircle,
+  Home,
+  Wallet,
+  UsersRound,
+} from "lucide-react"
 
-interface Shop {
-  id: number
-  name: string
-}
+import type { ShopBilling, ShopOut, ShopRole } from "@/lib/api"
 
 interface SidebarProps {
-  shops: Shop[]
+  shops: ShopOut[]
   selectedShopId: number | null
   onShopChange: (shopId: number) => void
-  onAddShop: () => void
-  isSuperAdmin?: boolean
+  onAddShop?: () => void
+  selectedShopRole?: ShopRole | null
+  shopBilling?: ShopBilling | null
+  shopBillingLoading?: boolean
+  canCreateShop?: boolean
 }
 
-export default function Sidebar({ shops, selectedShopId, onShopChange, onAddShop, isSuperAdmin }: SidebarProps) {
+function roleRank(role: ShopRole | null | undefined) {
+  switch (role) {
+    case "owner":
+      return 4
+    case "manager":
+      return 3
+    default:
+      return 0
+  }
+}
+
+function can(role: ShopRole | null | undefined, min: ShopRole) {
+  return roleRank(role) >= roleRank(min)
+}
+
+function roleLabel(role: ShopRole) {
+  switch (role) {
+    case "owner":
+      return "Владелец"
+    case "manager":
+      return "Менеджер"
+    default:
+      return "—"
+  }
+}
+
+export default function Sidebar({
+  shops,
+  selectedShopId,
+  onShopChange,
+  onAddShop, // ✅ MUHIM: bu yerda destructuring bo‘lishi shart
+  selectedShopRole,
+  shopBilling,
+  shopBillingLoading,
+  canCreateShop,
+}: SidebarProps) {
   const pathname = usePathname()
-  const isDashboard = pathname === "/dashboard" || pathname.startsWith("/dashboard/")
 
   const nav = [
-    { href: "/dashboard", label: "Главная", icon: Home },
-    { href: "/feedbacks", label: "Отзывы", icon: MessageSquare },
-    { href: "/questions", label: "Вопросы", icon: HelpCircle },
-    { href: "/drafts", label: "Черновики", icon: FileText },
-    { href: "/chat", label: "Чаты", icon: MessageCircle },
-    { href: "/settings", label: "Настройки", icon: Settings },
+    { href: "/app/dashboard", label: "Главная", icon: Home },
+    { href: "/app/feedbacks", label: "Отзывы", icon: MessageSquare },
+    { href: "/app/questions", label: "Вопросы", icon: HelpCircle },
+    { href: "/app/drafts", label: "Черновики", icon: FileText },
+    { href: "/app/chat", label: "Чаты", icon: MessageCircle },
   ]
 
-  if (isSuperAdmin) {
-    nav.push({ href: "/admin/prompts", label: "Промпты", icon: Shield })
-    nav.push({ href: "/admin/users", label: "Пользователи", icon: Users })
+  const isOwner = selectedShopRole === "owner"
+  const canSettings = Boolean(can(selectedShopRole, "manager"))
+
+  // TZ: billing + team are owner-only in v1.
+  if (isOwner) {
+    nav.push({ href: "/app/billing", label: "Баланс", icon: Wallet })
+    nav.push({ href: "/app/team", label: "Команда", icon: UsersRound })
+  }
+  if (canSettings) {
+    nav.push({ href: "/app/settings", label: "Настройки", icon: Settings })
   }
 
   return (
     <div className="flex h-full w-64 flex-col bg-sidebar border-r border-sidebar-border">
       <div className="p-4">
-        <h1 className="text-2xl font-bold bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent">
-          AVEOTVET
-        </h1>
+        <h1 className="text-2xl font-bold wb-gradient-text">AVEOTVET</h1>
         <p className="text-xs text-muted-foreground mt-1">Feedback Manager</p>
       </div>
 
@@ -53,33 +101,57 @@ export default function Sidebar({ shops, selectedShopId, onShopChange, onAddShop
       <div className="p-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Магазин</span>
-          <Button variant="ghost" size="sm" onClick={onAddShop} className="h-6 px-2 text-primary hover:bg-secondary">
-            <PlusCircle className="h-4 w-4" />
-          </Button>
+
+          {/* ✅ bu yerda canCreateShop va onAddShop ikkalasi ham bo‘lsa button chiqadi */}
+          {canCreateShop && onAddShop ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onAddShop}
+              className="h-7 w-7 p-0 rounded-xl text-primary hover:bg-secondary/70"
+              aria-label="Добавить магазин"
+            >
+              <PlusCircle className="h-4 w-4" />
+            </Button>
+          ) : null}
         </div>
 
-        {isDashboard ? (
-          <div className="text-xs text-muted-foreground leading-snug">
-            Выбор магазина выполняется на дашборде.
+        <Select
+          value={selectedShopId ? selectedShopId.toString() : ""}
+          onValueChange={(value) => onShopChange(Number.parseInt(value, 10))}
+          disabled={shops.length === 0}
+        >
+          <SelectTrigger className="w-full bg-input border-border text-foreground rounded-xl">
+            <SelectValue placeholder={shops.length ? "Выберите магазин" : "Магазинов нет"} />
+          </SelectTrigger>
+          <SelectContent className="bg-card border-border">
+            {shops.map((shop) => (
+              <SelectItem key={shop.id} value={shop.id.toString()} className="text-foreground">
+                {shop.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {isOwner ? (
+          <div className="mt-3 rounded-2xl border border-border bg-card p-3">
+            <div className="text-xs text-muted-foreground">Баланс магазина</div>
+            {selectedShopRole ? (
+              <div className="text-xs text-muted-foreground mt-1">Роль: {roleLabel(selectedShopRole)}</div>
+            ) : null}
+
+            <div className="mt-1 flex items-baseline justify-between gap-2">
+              <div className="text-lg font-semibold text-foreground">
+                {shopBillingLoading ? "…" : shopBilling?.credits_balance ?? 0}
+              </div>
+              <div className="text-xs text-muted-foreground">кредитов</div>
+            </div>
+
+            {shopBilling?.credits_spent !== undefined ? (
+              <div className="text-xs text-muted-foreground mt-1">Потрачено: {shopBilling.credits_spent}</div>
+            ) : null}
           </div>
-        ) : (
-          <Select
-            value={selectedShopId ? selectedShopId.toString() : ""}
-            onValueChange={(value) => onShopChange(Number.parseInt(value, 10))}
-            disabled={shops.length === 0}
-          >
-            <SelectTrigger className="w-full bg-input border-border text-foreground">
-              <SelectValue placeholder={shops.length ? "Выберите магазин" : "Магазинов нет"} />
-            </SelectTrigger>
-            <SelectContent className="bg-card border-border">
-              {shops.map((shop) => (
-                <SelectItem key={shop.id} value={shop.id.toString()} className="text-foreground">
-                  {shop.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+        ) : null}
       </div>
 
       <Separator className="bg-sidebar-border" />
@@ -88,17 +160,19 @@ export default function Sidebar({ shops, selectedShopId, onShopChange, onAddShop
         {nav.map((item) => {
           const Icon = item.icon
           const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href + "/"))
+
           return (
             <Link key={item.href} href={item.href}>
               <Button
-                variant={active ? "default" : "ghost"}
-                className={`w-full justify-start text-sm ${
-                  active
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "text-sidebar-foreground hover:bg-secondary"
-                }`}
+                variant="ghost"
+                className={
+                  "w-full justify-start text-sm rounded-xl transition-colors " +
+                  (active
+                    ? "bg-primary/10 text-primary hover:bg-primary/15"
+                    : "text-sidebar-foreground hover:bg-secondary/70")
+                }
               >
-                <Icon className="mr-2 h-4 w-4" />
+                <Icon className={"mr-2 h-4 w-4 " + (active ? "text-primary" : "text-muted-foreground")} />
                 {item.label}
               </Button>
             </Link>

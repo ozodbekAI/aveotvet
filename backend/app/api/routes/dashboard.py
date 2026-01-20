@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, date, timedelta, timezone
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, and_, or_, desc, cast, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,10 +46,15 @@ def _range_dates(
         return d_from, d_to
 
     if period:
-        m = re.match(r"^(\d{1,3})d$", period.strip())
-        if not m:
-            raise HTTPException(status_code=400, detail="Invalid period format. Expected like '14d'.")
-        range_days = int(m.group(1))
+        p = period.strip().lower()
+        if p == "all":
+            # "Весь период" in UI. For dashboards we cap to 365 days to avoid huge daily time-series.
+            range_days = 365
+        else:
+            m = re.match(r"^(\d{1,3})d$", p)
+            if not m:
+                raise HTTPException(status_code=400, detail="Invalid period format. Expected like '14d' or 'all'.")
+            range_days = int(m.group(1))
 
     if range_days < 1 or range_days > 365:
         raise HTTPException(status_code=400, detail="range_days must be between 1 and 365")
@@ -70,9 +75,9 @@ def _date_bounds_utc(d_from: date, d_to: date) -> tuple[datetime, datetime]:
     return dt_from, dt_to
 
 
-async def _accessible_shop_ids(db: AsyncSession, user, shop_id: int | None) -> list[int]:
+async def _accessible_shop_ids(db: AsyncSession, request: Request, user, shop_id: int | None) -> list[int]:
     if shop_id is not None:
-        (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.viewer.value)).shop
+        (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
         return [int(shop_id)]
 
     # "Все магазины" = all accessible shops.
@@ -210,6 +215,7 @@ async def _top_products_feedbacks(
 
 @router.get("/feedbacks", response_model=DashboardFeedbacksOut)
 async def dashboard_feedbacks(
+    request: Request,
     shop_id: int | None = Query(default=None),
     period: str | None = Query(default=None, description="Frontend-style period, e.g. '7d', '14d', '30d'"),
     range_days: int = Query(default=14, ge=1, le=365),
@@ -219,7 +225,7 @@ async def dashboard_feedbacks(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    shop_ids = await _accessible_shop_ids(db, user, shop_id)
+    shop_ids = await _accessible_shop_ids(db, request, user, shop_id)
     if not shop_ids:
         raise HTTPException(status_code=404, detail="No accessible shops")
 
@@ -253,6 +259,7 @@ async def dashboard_feedbacks(
 
 @router.post("/feedbacks/sync", response_model=DashboardSyncOut)
 async def dashboard_feedbacks_sync(
+    request: Request,
     shop_id: int | None = Query(default=None),
     period: str | None = Query(default=None, description="Frontend-style period, e.g. '7d', '14d', '30d'"),
     range_days: int = Query(default=14, ge=1, le=365),
@@ -262,7 +269,7 @@ async def dashboard_feedbacks_sync(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    shop_ids = await _accessible_shop_ids(db, user, shop_id)
+    shop_ids = await _accessible_shop_ids(db,request, user, shop_id)
     if not shop_ids:
         raise HTTPException(status_code=404, detail="No accessible shops")
 
@@ -305,6 +312,7 @@ async def dashboard_feedbacks_sync(
 # Aliases for earlier naming (if frontend or docs refer to reviews)
 @router.get("/reviews", response_model=DashboardFeedbacksOut)
 async def dashboard_reviews_alias(
+    request: Request,
     shop_id: int | None = Query(default=None),
     period: str | None = Query(default=None, description="Frontend-style period, e.g. '7d', '14d', '30d'"),
     range_days: int = Query(default=14, ge=1, le=365),
@@ -328,6 +336,7 @@ async def dashboard_reviews_alias(
 
 @router.post("/reviews/sync", response_model=DashboardSyncOut)
 async def dashboard_reviews_sync_alias(
+    request: Request,
     shop_id: int | None = Query(default=None),
     period: str | None = Query(default=None, description="Frontend-style period, e.g. '7d', '14d', '30d'"),
     range_days: int = Query(default=14, ge=1, le=365),
@@ -352,6 +361,7 @@ async def dashboard_reviews_sync_alias(
 # Questions/chats: lightweight placeholders so frontend can already integrate tabs.
 @router.get("/questions", response_model=DashboardFeedbacksOut)
 async def dashboard_questions(
+    request: Request,
     shop_id: int | None = Query(default=None),
     period: str | None = Query(default=None, description="Frontend-style period, e.g. '7d', '14d', '30d'"),
     range_days: int = Query(default=14, ge=1, le=365),
@@ -361,7 +371,7 @@ async def dashboard_questions(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    shop_ids = await _accessible_shop_ids(db, user, shop_id)
+    shop_ids = await _accessible_shop_ids(db, request, user, shop_id)
     if not shop_ids:
         raise HTTPException(status_code=404, detail="No accessible shops")
 
@@ -439,6 +449,7 @@ async def _timeseries_questions(db: AsyncSession, shop_ids: list[int], d_from: d
 
 @router.post("/questions/sync", response_model=DashboardSyncOut)
 async def dashboard_questions_sync(
+    request: Request,
     shop_id: int | None = Query(default=None),
     period: str | None = Query(default=None, description="Frontend-style period, e.g. '7d', '14d', '30d'"),
     range_days: int = Query(default=14, ge=1, le=365),
@@ -486,6 +497,7 @@ async def dashboard_questions_sync(
 
 @router.get("/chats", response_model=DashboardFeedbacksOut)
 async def dashboard_chats(
+    request: Request,
     shop_id: int | None = Query(default=None),
     period: str | None = Query(default=None, description="Frontend-style period, e.g. '7d', '14d', '30d'"),
     range_days: int = Query(default=14, ge=1, le=365),
@@ -494,7 +506,7 @@ async def dashboard_chats(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    shop_ids = await _accessible_shop_ids(db, user, shop_id)
+    shop_ids = await _accessible_shop_ids(db, request, user, shop_id)
     if not shop_ids:
         raise HTTPException(status_code=404, detail="No accessible shops")
 
@@ -571,6 +583,7 @@ async def _timeseries_chats(db: AsyncSession, shop_ids: list[int], d_from: date,
 
 @router.post("/chats/sync", response_model=DashboardSyncOut)
 async def dashboard_chats_sync(
+    request: Request,
     shop_id: int | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),

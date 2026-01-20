@@ -24,7 +24,6 @@ class Question(Base):
     state: Mapped[str | None] = mapped_column(String(32), nullable=True)
     was_viewed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    # Answer info
     answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     answer_editable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 

@@ -17,6 +17,7 @@ class JobStatus(str, enum.Enum):
     running = "running"
     done = "done"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class JobType(str, enum.Enum):
@@ -36,9 +37,8 @@ class JobType(str, enum.Enum):
     sync_product_cards = "sync_product_cards"
 
 class UserRole(str, enum.Enum):
-    """Platform-wide role."""
     super_admin = "super_admin"
-    shop_owner = "shop_owner"
+    support_admin = "support_admin"
     user = "user"
 
     @classmethod
@@ -47,9 +47,6 @@ class UserRole(str, enum.Enum):
 
 
 class ShopMemberRole(str, enum.Enum):
-    """Role within a specific shop."""
-    viewer = "viewer"
-    operator = "operator"
     manager = "manager"
     owner = "owner"
 
@@ -59,10 +56,8 @@ class ShopMemberRole(str, enum.Enum):
 
 
 SHOP_ROLE_LEVEL: dict[str, int] = {
-    ShopMemberRole.viewer.value: 1,
-    ShopMemberRole.operator.value: 2,
-    ShopMemberRole.manager.value: 3,
-    ShopMemberRole.owner.value: 4,
+    ShopMemberRole.manager.value: 1,
+    ShopMemberRole.owner.value: 2,
 }
 
 

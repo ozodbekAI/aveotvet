@@ -149,7 +149,12 @@ def effective_mode_for_rating(shop_settings: ShopSettings, rating: int | None) -
     return base
 
 
-async def generate_draft_text(openai: OpenAIService, feedback: Feedback, shop_settings: ShopSettings, bundle: PromptBundle | None = None) -> tuple[str, str, str | None]:
+async def generate_draft_text(
+    openai: OpenAIService,
+    feedback: Feedback,
+    shop_settings: ShopSettings,
+    bundle: PromptBundle | None = None,
+) -> tuple[str, str, str | None, int, int]:
     pd = feedback.product_details or {}
     brand = pd.get("brandName")
     brand = brand.strip() if isinstance(brand, str) and brand.strip() else None
@@ -162,4 +167,4 @@ async def generate_draft_text(openai: OpenAIService, feedback: Feedback, shop_se
         instructions=instructions,
         input_text=input_text,
     )
-    return sanitize_output(res.text), res.model, res.response_id
+    return sanitize_output(res.text), res.model, res.response_id, int(res.prompt_tokens), int(res.completion_tokens)

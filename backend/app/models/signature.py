@@ -19,13 +19,10 @@ class Signature(Base):
         nullable=False,
     )
 
-    # Actual signature text (placed at the end of reply)
     text: Mapped[str] = mapped_column(Text, nullable=False)
 
-    # all | review | question | chat
     type: Mapped[str] = mapped_column(String(16), default="all", nullable=False, index=True)
 
-    # all | brand name
     brand: Mapped[str] = mapped_column(String(128), default="all", nullable=False, index=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)

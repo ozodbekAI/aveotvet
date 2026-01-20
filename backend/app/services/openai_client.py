@@ -13,6 +13,8 @@ class OpenAIResult:
     text: str
     model: str
     response_id: str | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class OpenAIService:
@@ -28,8 +30,25 @@ class OpenAIService:
             instructions=instructions,
             input=input_text,
         )
+        # The OpenAI Python SDK returns usage differently depending on API/model.
+        # We keep this tolerant and default to 0 when unavailable.
+        prompt_tokens = 0
+        completion_tokens = 0
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            # Responses API typically reports input_tokens / output_tokens.
+            prompt_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+            completion_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+            # Fallback names
+            if not prompt_tokens:
+                prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+            if not completion_tokens:
+                completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+
         return OpenAIResult(
-            text=(resp.output_text or "").strip(),
+            text=(getattr(resp, "output_text", None) or "").strip(),
             model=model,
             response_id=getattr(resp, "id", None),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
         )

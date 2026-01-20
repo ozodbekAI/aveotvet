@@ -20,8 +20,8 @@ class ShopMember(Base):
     shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
-    # viewer | operator | manager | owner
-    role: Mapped[str] = mapped_column(String(16), default="viewer", nullable=False)
+    # v1 RBAC: only owner/manager are supported
+    role: Mapped[str] = mapped_column(String(16), default="manager", nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 

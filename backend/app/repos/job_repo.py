@@ -69,3 +69,7 @@ class JobRepo:
         )
         cnt = (await self.session.execute(q)).scalar_one()
         return int(cnt) > 0
+
+    async def count_by_status(self, status: str) -> int:
+        q = select(func.count()).select_from(Job).where(Job.status == status)
+        return int((await self.session.execute(q)).scalar_one() or 0)

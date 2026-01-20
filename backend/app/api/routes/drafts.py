@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
+from app.core.config import settings as app_settings
 from app.repos.product_card_repo import ProductCardRepo
 
 from app.api.deps import get_db, get_current_user
@@ -12,6 +12,7 @@ from app.models.enums import ShopMemberRole
 from app.repos.shop_repo import ShopRepo
 from app.repos.feedback_repo import FeedbackRepo
 from app.repos.draft_repo import DraftRepo
+from app.repos.shop_billing_repo import ShopBillingRepo
 from app.schemas.drafts import DraftListItem, DraftDetail, DraftUpdateRequest
 
 import logging
@@ -49,15 +50,15 @@ async def _attach_product_images(db: AsyncSession, shop_id: int, drafts: list) -
     uniq = sorted(set(nm_ids))
     thumbs = await ProductCardRepo(db).get_thumbnails(shop_id=shop_id, nm_ids=uniq)
 
-    if settings.DEBUG_PRODUCT_CARDS:
-        missing = len(uniq) - len(thumbs)
-        if missing > 0:
-            log.warning(
-                "[drafts] missing product thumbs for shop_id=%s: %s/%s",
-                shop_id,
-                missing,
-                len(uniq),
-            )
+    # if settings.DEBUG_PRODUCT_CARDS:
+    #     missing = len(uniq) - len(thumbs)
+    #     if missing > 0:
+    #         log.warning(
+    #             "[drafts] missing product thumbs for shop_id=%s: %s/%s",
+    #             shop_id,
+    #             missing,
+    #             len(uniq),
+    #         )
 
     for d in drafts or []:
         fb = getattr(d, "feedback", None)
@@ -78,13 +79,14 @@ async def _attach_product_images(db: AsyncSession, shop_id: int, drafts: list) -
 async def list_drafts(
     shop_id: int,
     response: Response,
+    request: Request,
     status: str | None = Query(default=None, description="drafted|published|rejected"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     
     drafts, total = await DraftRepo(db).list_by_shop(
         shop_id=shop_id,
@@ -103,6 +105,7 @@ async def list_drafts(
 async def list_pending_drafts(
     shop_id: int,
     response: Response,
+    request: Request,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -112,7 +115,7 @@ async def list_pending_drafts(
     List pending drafts (status=drafted) that are waiting for review.
     This is most useful when auto_draft=true but auto_publish=false.
     """
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     
     drafts, total = await DraftRepo(db).list_pending(
         shop_id=shop_id,
@@ -130,11 +133,12 @@ async def list_pending_drafts(
 async def get_draft(
     shop_id: int,
     draft_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
     """Get specific draft details."""
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     
     draft = await DraftRepo(db).get_with_feedback(draft_id)
     if not draft or draft.feedback.shop_id != shop_id:
@@ -149,6 +153,7 @@ async def get_draft(
 async def update_draft(
     shop_id: int,
     draft_id: int,
+    request: Request,
     payload: DraftUpdateRequest,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
@@ -157,7 +162,7 @@ async def update_draft(
     Update draft text before publishing.
     Useful for manually editing auto-generated drafts.
     """
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     
     draft = await DraftRepo(db).get_with_feedback(draft_id)
     if not draft or draft.feedback.shop_id != shop_id:
@@ -179,6 +184,7 @@ async def update_draft(
 async def approve_draft(
     shop_id: int,
     draft_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -186,7 +192,7 @@ async def approve_draft(
     Approve and publish a draft.
     This will publish the draft to Wildberries.
     """
-    shop = (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+    shop = (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     
     draft = await DraftRepo(db).get_with_feedback(draft_id)
     if not draft or draft.feedback.shop_id != shop_id:
@@ -223,6 +229,7 @@ async def approve_draft(
 async def reject_draft(
     shop_id: int,
     draft_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -230,7 +237,7 @@ async def reject_draft(
     Reject a draft.
     This marks the draft as rejected and won't be published.
     """
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     
     draft = await DraftRepo(db).get_with_feedback(draft_id)
     if not draft or draft.feedback.shop_id != shop_id:
@@ -250,6 +257,7 @@ async def reject_draft(
 async def regenerate_draft(
     shop_id: int,
     draft_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -257,24 +265,49 @@ async def regenerate_draft(
 
     UX expectation: the same draft record should be updated in-place.
     """
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     
     draft = await DraftRepo(db).get_with_feedback(draft_id)
     if not draft or draft.feedback.shop_id != shop_id:
         raise HTTPException(status_code=404, detail="Draft not found")
     
-    settings = await ShopRepo(db).get_settings(shop_id)
-    if not settings:
+    settings_obj = await ShopRepo(db).get_settings(shop_id)
+    if not settings_obj:
         raise HTTPException(status_code=404, detail="Settings not found")
     
+    # Billing: charge credits before spending OpenAI tokens.
+    credits_per_draft = int(getattr(app_settings, "CREDITS_PER_DRAFT", 1) or 1)
+    charged = False
+    if credits_per_draft > 0:
+        charged = await ShopBillingRepo(db).try_charge(
+            shop_id,
+            amount=credits_per_draft,
+            reason="feedback_regenerate",
+            meta={"shop_id": shop_id, "draft_id": draft_id, "feedback_id": draft.feedback_id},
+        )
+        if not charged:
+            raise HTTPException(status_code=402, detail="Insufficient credits")
+
     from app.services.openai_client import OpenAIService
     from app.services.drafting import generate_draft_text
+    from app.services.gpt_accounting import record_gpt_usage
     bundle = await get_global_bundle(db)
-    
+
     openai = OpenAIService()
-    text, model, response_id = await generate_draft_text(
-        openai, draft.feedback, settings, bundle=bundle
-    )
+    try:
+        text, model, response_id, prompt_tokens, completion_tokens = await generate_draft_text(
+            openai, draft.feedback, settings_obj, bundle=bundle
+        )
+    except Exception:
+        if charged and credits_per_draft > 0:
+            await ShopBillingRepo(db).apply_credits(
+                shop_id,
+                delta=credits_per_draft,
+                reason="refund_feedback_regenerate_error",
+                meta={"shop_id": shop_id, "draft_id": draft_id, "feedback_id": draft.feedback_id},
+            )
+            await db.flush()
+        raise
     
     updated = await DraftRepo(db).update_text(
         draft_id,
@@ -284,6 +317,16 @@ async def regenerate_draft(
     )
     if not updated:
         raise HTTPException(status_code=404, detail="Draft not found")
+
+    await record_gpt_usage(
+        db,
+        shop_id=shop_id,
+        model=model,
+        operation_type="review_draft",
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        response_id=response_id,
+    )
 
     await db.commit()
     await db.refresh(updated)
@@ -298,6 +341,7 @@ async def regenerate_draft(
 @router.get("/{shop_id}/drafts/stats")
 async def get_draft_stats(
     shop_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -305,7 +349,7 @@ async def get_draft_stats(
     Get draft statistics for the shop.
     Useful for dashboard showing pending drafts count.
     """
-    (await require_shop_access(db, user, shop_id, min_role=ShopMemberRole.operator.value)).shop
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
     
     stats = await DraftRepo(db).get_stats(shop_id)
     return stats

@@ -22,12 +22,32 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str = "gpt-5.2"
     OPENAI_TIMEOUT_SEC: int = 60
 
+    # --- GPT accounting ---
+    # Exchange rate used to convert cost_usd -> cost_rub at the moment of generation.
+    USD_TO_RUB: float = 90.0
+
+    # Optional per-model pricing config. If empty, cost will be recorded as 0
+    # but token counts will still be persisted.
+    # Format: {"model": {"input_per_1k_usd": 0.15, "output_per_1k_usd": 0.6}}
+    MODEL_PRICING: dict = Field(default_factory=dict)
+
     WORKER_POLL_INTERVAL_SEC: int = 2
     WORKER_MAX_JOBS_PER_TICK: int = 10
 
     # Autosync (worker scheduler)
     AUTO_SYNC_ENABLED: bool = True
-    AUTO_SYNC_INTERVAL_MIN: int = 30
+    AUTO_SYNC_INTERVAL_MIN: int = 60
+
+    # Autosync safety caps
+    AUTO_SYNC_TAKE: int = 500
+    AUTO_SYNC_MAX_TOTAL: int = 2000
+
+    # Manual sync safety cap (per job)
+    SYNC_MAX_TOTAL: int = 20000
+
+    # Billing
+    CREDITS_PER_DRAFT: int = 1
+    CREDITS_PER_PUBLISH: int = 0
 
     # Product cards sync (Content API) - used for returning product photo URL in feedback API
     CARDS_SYNC_ENABLED: bool = True

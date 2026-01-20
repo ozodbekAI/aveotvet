@@ -2,41 +2,46 @@
 
 import type React from "react"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import Sidebar from "@/components/layout/sidebar"
 import { ShopProvider } from "@/components/shop-context"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import CreateShopDialog from "@/components/create-shop-dialog"
 
-import { createShop, listShops, getMe } from "@/lib/api"
+import { getBillingShop, listShops, getMe, type ShopOut, type ShopBilling } from "@/lib/api"
 import { clearAuthToken } from "@/lib/auth"
 import { LogOut, RefreshCw } from "lucide-react"
 
-type Shop = { id: number; name: string }
-
 const SELECTED_SHOP_KEY = "wb_otveto_selected_shop_id"
+
+function roleLabel(role?: string) {
+  switch (role) {
+    case "owner":
+      return "Владелец"
+    case "manager":
+      return "Менеджер"
+    default:
+      return role || "—"
+  }
+}
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
 
-  const [shops, setShops] = useState<Shop[]>([])
+  const [shops, setShops] = useState<ShopOut[]>([])
   const [selectedShopId, setSelectedShopId] = useState<number | null>(null)
   const [loadingShops, setLoadingShops] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
 
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false)
+  const [me, setMe] = useState<{ id: number; email: string; role: string } | null>(null)
 
-  // Add shop dialog
-  const [addOpen, setAddOpen] = useState(false)
-  const [newShopName, setNewShopName] = useState("")
-  const [newShopToken, setNewShopToken] = useState("")
-  const [creatingShop, setCreatingShop] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
+  const [shopBilling, setShopBilling] = useState<ShopBilling | null>(null)
+  const [shopBalanceLoading, setShopBalanceLoading] = useState(false)
 
   const selectedShop = useMemo(() => shops.find((s) => s.id === selectedShopId) || null, [shops, selectedShopId])
+  const selectedShopRole = useMemo(() => (selectedShop?.my_role as any) || null, [selectedShop])
 
   useEffect(() => {
     const saved = typeof window !== "undefined" ? window.localStorage.getItem(SELECTED_SHOP_KEY) : null
@@ -52,44 +57,89 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [selectedShopId])
 
+  const refresh = useCallback(async () => {
+    // Load current user info + shops list.
+    setLoadingShops(true)
+    try {
+      try {
+        const meData = await getMe()
+        setMe(meData)
+      } catch {
+        setMe(null)
+      }
+
+      const data = await listShops()
+      setShops(data || [])
+
+      // If no shop selected, select first.
+      if (!selectedShopId && data?.length) {
+        setSelectedShopId(data[0].id)
+      }
+      // If selected shop was deleted, fallback.
+      if (selectedShopId && data && !data.some((s) => s.id === selectedShopId)) {
+        setSelectedShopId(data.length ? data[0].id : null)
+      }
+    } finally {
+      setLoadingShops(false)
+    }
+  }, [selectedShopId])
+
   useEffect(() => {
     let mounted = true
     ;(async () => {
       try {
-        // Load current user role (optional). If backend is down/unauthorized, ignore.
-        try {
-          const me = await getMe()
-          if (mounted) setIsSuperAdmin(me?.role === "super_admin")
-        } catch {
-          // ignore
-        }
-        setLoadingShops(true)
-        const data = await listShops()
-        if (!mounted) return
-        setShops(data)
-
-        // If no shop selected, select first.
-        if (!selectedShopId && data.length) {
-          setSelectedShopId(data[0].id)
-        }
-        // If selected shop was deleted, fallback.
-        if (selectedShopId && !data.some((s) => s.id === selectedShopId)) {
-          setSelectedShopId(data.length ? data[0].id : null)
-        }
+        await refresh()
       } catch {
-        // If unauthorized or backend down, redirect to login.
-        // The server-side layout guard will also handle missing cookies.
+        // ignore
       } finally {
-        if (mounted) setLoadingShops(false)
+        if (!mounted) return
       }
     })()
     return () => {
       mounted = false
     }
-  }, [selectedShopId])
+  }, [refresh])
+
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      if (!selectedShopId) {
+        if (mounted) setShopBilling(null)
+        return
+      }
+
+      const role = shops.find((s) => s.id === selectedShopId)?.my_role
+      // TZ: store billing is owner-only.
+      const canSee = role === "owner"
+      if (!canSee) {
+        if (mounted) setShopBilling(null)
+        return
+      }
+
+      try {
+        if (mounted) setShopBalanceLoading(true)
+        const b = await getBillingShop(selectedShopId)
+        if (mounted) setShopBilling(b || null)
+      } catch {
+        if (mounted) setShopBilling(null)
+      } finally {
+        if (mounted) setShopBalanceLoading(false)
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [selectedShopId, shops])
 
   const handleShopChange = (shopId: number) => {
     setSelectedShopId(shopId)
+    router.refresh()
+  }
+
+  const handleCreated = async (shop: ShopOut) => {
+    // Refresh list and select newly created shop.
+    await refresh()
+    setSelectedShopId(shop.id)
     router.refresh()
   }
 
@@ -99,61 +149,32 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     router.refresh()
   }
 
-  const handleCreateShop = async () => {
-    setCreateError(null)
-    if (!newShopName.trim()) {
-      setCreateError("Укажите название магазина")
-      return
-    }
-    if (!newShopToken.trim()) {
-      setCreateError("Укажите токен WB")
-      return
-    }
-
-    try {
-      setCreatingShop(true)
-      const created = await createShop({ name: newShopName.trim(), wb_token: newShopToken.trim() })
-      const updated = await listShops()
-      setShops(updated)
-      setSelectedShopId(created.id)
-      setNewShopName("")
-      setNewShopToken("")
-      setAddOpen(false)
-      router.refresh()
-    } catch (e: any) {
-      setCreateError(e?.message || "Не удалось создать магазин")
-    } finally {
-      setCreatingShop(false)
-    }
-  }
-
   return (
     <div className="h-screen flex bg-background">
       <Sidebar
         shops={shops}
         selectedShopId={selectedShopId}
         onShopChange={handleShopChange}
-        onAddShop={() => setAddOpen(true)}
-        isSuperAdmin={isSuperAdmin}
+        selectedShopRole={selectedShopRole}
+        shopBilling={shopBilling}
+        shopBillingLoading={shopBalanceLoading}
+        canCreateShop={true}
+        onAddShop={() => setCreateOpen(true)}
       />
+
+      <CreateShopDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={handleCreated} />
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-card border-b border-border px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="min-w-0">
-              <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">
-                Текущий магазин
-              </div>
+              <div className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Текущий магазин</div>
               <div className="font-semibold text-foreground truncate text-lg">
                 {loadingShops ? "Загрузка…" : selectedShop?.name || "Магазин не выбран"}
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                onClick={() => router.refresh()}
-                className="border-border text-foreground hover:bg-secondary"
-              >
+              <Button variant="outline" onClick={refresh} className="border-border text-foreground hover:bg-secondary">
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Обновить
               </Button>
@@ -169,17 +190,34 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <ShopProvider value={{ shopId: selectedShopId, setShopId: setSelectedShopId }}>
-          <main className="flex-1 overflow-auto p-6">
+        <ShopProvider
+          value={{
+            shopId: selectedShopId,
+            setShopId: setSelectedShopId,
+            shops,
+            selectedShop,
+            shopRole: selectedShopRole,
+            me,
+            isSuperAdmin: false,
+            billing: shopBilling,
+            refresh,
+          }}
+        >
+          {/*
+            IMPORTANT: the app scroll container is inside <main>, not the <body>.
+            Some modal libraries lock <body> scrolling only; we use this id to
+            reliably lock background scroll when dialogs are open.
+          */}
+          <main id="app-scroll" data-scroll-container className="flex-1 overflow-auto p-6">
             {/* Pages rely on shop_id; enforce selection early */}
             {!selectedShopId ? (
               <div className="max-w-xl">
-                <div className="text-2xl font-bold text-foreground mb-2">Магазины отсутствуют</div>
+                <div className="text-2xl font-bold text-foreground mb-2">У вас пока нет магазинов</div>
                 <div className="text-sm text-muted-foreground mb-4">
-                  Создайте магазин и добавьте токен Wildberries, чтобы начать синхронизацию отзывов, вопросов и чатов.
+                  Создайте первый магазин — после этого вы сможете подключить токен WB и начать работу с отзывами/вопросами/чатами.
                 </div>
-                <Button onClick={() => setAddOpen(true)} className="bg-primary hover:bg-primary/90">
-                  Создать первый магазин
+                <Button onClick={() => setCreateOpen(true)}>
+                  Создать магазин
                 </Button>
               </div>
             ) : (
@@ -188,58 +226,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </main>
         </ShopProvider>
       </div>
-
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
-        <DialogContent className="bg-card border-border">
-          <DialogHeader>
-            <DialogTitle className="text-foreground">Добавить магазин</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="shop_name" className="text-foreground">
-                Название
-              </Label>
-              <Input
-                id="shop_name"
-                value={newShopName}
-                onChange={(e) => setNewShopName(e.target.value)}
-                placeholder="Мой магазин WB"
-                className="mt-2 bg-input border-border text-foreground placeholder:text-muted-foreground"
-              />
-            </div>
-            <div>
-              <Label htmlFor="wb_token" className="text-foreground">
-                WB токен
-              </Label>
-              <Input
-                id="wb_token"
-                value={newShopToken}
-                onChange={(e) => setNewShopToken(e.target.value)}
-                placeholder="..."
-                className="mt-2 bg-input border-border text-foreground placeholder:text-muted-foreground"
-              />
-              <div className="text-xs text-muted-foreground mt-1">
-                Хранится в backend и используется для синхронизации отзывов, вопросов и чатов.
-              </div>
-            </div>
-
-            {createError ? <div className="text-sm text-destructive">{createError}</div> : null}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setAddOpen(false)}
-              disabled={creatingShop}
-              className="border-border text-foreground hover:bg-secondary"
-            >
-              Отмена
-            </Button>
-            <Button onClick={handleCreateShop} disabled={creatingShop} className="bg-primary hover:bg-primary/90">
-              {creatingShop ? "Создание…" : "Создать"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

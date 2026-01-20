@@ -8,7 +8,6 @@ from app.api.router import router as api_router
 
 app = FastAPI(title=settings.APP_NAME)
 
-# CORS
 origins = [o.strip() for o in (settings.CORS_ORIGINS or "*").split(",")] if settings.CORS_ORIGINS else ["*"]
 app.add_middleware(
     CORSMiddleware,

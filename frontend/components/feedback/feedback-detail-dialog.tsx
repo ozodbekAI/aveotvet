@@ -95,6 +95,8 @@ export default function FeedbackDetailDialog({
   error,
   onReload,
   onPublished,
+  initialTab = "review",
+  autoFocusAnswer = false,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -104,9 +106,14 @@ export default function FeedbackDetailDialog({
   error: string | null
   onReload?: () => Promise<void> | void
   onPublished?: () => Promise<void> | void
+  initialTab?: "review" | "answer"
+  autoFocusAnswer?: boolean
 }) {
   const { toast } = useToast()
   useScrollLock(open)
+
+  const answerRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const [tab, setTab] = React.useState<"review" | "answer">(initialTab)
 
   const [answerText, setAnswerText] = React.useState("")
   const [draftId, setDraftId] = React.useState<number | null>(null)
@@ -114,6 +121,23 @@ export default function FeedbackDetailDialog({
   const [actionError, setActionError] = React.useState<string | null>(null)
 
   const isAnswered = Boolean((data?.answer_text || "").trim())
+
+  // When opened from "Ожидают ответа": switch to answer tab and focus the textarea.
+  React.useEffect(() => {
+    if (!open) return
+    const next = autoFocusAnswer ? "answer" : initialTab
+    setTab(next)
+  }, [open, autoFocusAnswer, initialTab])
+
+  React.useEffect(() => {
+    if (!open) return
+    if (!autoFocusAnswer) return
+    if (tab !== "answer") return
+    const t = window.setTimeout(() => {
+      answerRef.current?.focus()
+    }, 80)
+    return () => window.clearTimeout(t)
+  }, [open, autoFocusAnswer, tab])
 
   React.useEffect(() => {
     if (!open) return
@@ -352,6 +376,7 @@ export default function FeedbackDetailDialog({
           </div>
 
           <Textarea
+            ref={answerRef}
             value={answerText}
             onChange={(e) => setAnswerText(e.target.value)}
             placeholder="Напишите ответ или сгенерируйте черновик"
@@ -460,7 +485,7 @@ export default function FeedbackDetailDialog({
             <>
               {/* Mobile: tabs to avoid "long" ugly column */}
               <div className="lg:hidden">
-                <Tabs defaultValue="review" className="w-full">
+                <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
                   <TabsList className="w-full rounded-xl bg-muted/60">
                     <TabsTrigger value="review" className="flex-1 rounded-lg">
                       Отзыв

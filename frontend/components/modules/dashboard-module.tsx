@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 import { RefreshCw, SlidersHorizontal, Star, Wallet } from "lucide-react"
 import {
   Line,
@@ -21,7 +22,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-import { getDashboard, syncDashboard, type DashboardOut, type DashboardTabKey } from "@/lib/api"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+
+import { getDashboard, getSettings, syncDashboard, updateSettings, type DashboardOut, type DashboardTabKey } from "@/lib/api"
 import { useSyncPolling } from "@/hooks/use-sync-polling"
 
 type PeriodKey = "all" | "14d" | "7d" | "30d"
@@ -52,6 +55,10 @@ function topTabLabels(tab: DashboardTabKey) {
 
 export default function DashboardModule() {
   const { shopId, selectedShop, isSuperAdmin, billing, shopRole } = useShop()
+  const router = useRouter()
+
+  const [introOpen, setIntroOpen] = useState(false)
+  const [introChecking, setIntroChecking] = useState(false)
 
   const [activeTab, setActiveTab] = useState<DashboardTabKey>("feedbacks")
   const [period, setPeriod] = useState<PeriodKey>("14d")
@@ -68,6 +75,43 @@ export default function DashboardModule() {
   }, [isSuperAdmin, shopRole])
 
   const selectedShopId = shopId
+
+  // One-time dashboard explanation right after onboarding.
+  useEffect(() => {
+    let mounted = true
+    ;(async () => {
+      if (!selectedShopId) return
+      try {
+        if (mounted) setIntroChecking(true)
+        const s: any = await getSettings(selectedShopId)
+        const ob = s?.config?.onboarding
+        if (ob?.done && !ob?.dashboard_intro_seen) {
+          if (mounted) setIntroOpen(true)
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (mounted) setIntroChecking(false)
+      }
+    })()
+    return () => {
+      mounted = false
+    }
+  }, [selectedShopId])
+
+  const finishIntro = useCallback(async () => {
+    if (!selectedShopId) return
+    try {
+      await updateSettings(selectedShopId, {
+        config: { onboarding: { dashboard_intro_seen: true } },
+      })
+    } catch {
+      // ignore
+    } finally {
+      setIntroOpen(false)
+      router.push("/app/feedbacks")
+    }
+  }, [router, selectedShopId])
 
   const loadDashboard = useCallback(async () => {
     if (!selectedShopId) return
@@ -155,6 +199,38 @@ export default function DashboardModule() {
 
   return (
     <div className="space-y-6">
+      <Dialog open={introOpen} onOpenChange={setIntroOpen}>
+        <DialogContent showCloseButton={false} className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Быстрое объяснение (30 секунд)</DialogTitle>
+            <DialogDescription>
+              Я покажу, где здесь самое важное, а потом переведу вас на «Отзывы»...
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-3">
+            <div className="rounded-2xl border border-border p-4">
+              <div className="font-medium">1) Проблемы</div>
+              <div className="text-sm text-muted-foreground">Здесь будут подсказки, что требует внимания.</div>
+            </div>
+            <div className="rounded-2xl border border-border p-4">
+              <div className="font-medium">2) Ожидают ответа</div>
+              <div className="text-sm text-muted-foreground">Отзывы без ответа. Внутри сразу открыт ввод ответа.</div>
+            </div>
+            <div className="rounded-2xl border border-border p-4">
+              <div className="font-medium">3) Автоматизация</div>
+              <div className="text-sm text-muted-foreground">Черновики/публикация работают по настройкам, которые вы только что задали.</div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button onClick={finishIntro} className="rounded-2xl">
+              Перейти к отзывам
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Top bar */}
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">

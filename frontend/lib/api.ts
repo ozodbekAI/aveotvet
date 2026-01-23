@@ -1,6 +1,6 @@
 import { getAuthToken } from "@/lib/auth"
 
-const API_BASE = "https://aveotvet.ozodbek-akramov.uz/api"
+const API_BASE = "http://localhost:8000"
 
 export async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== "undefined" ? getAuthToken() : null
@@ -288,12 +288,11 @@ export async function getShopBrands(shopId: number) {
 }
 
 // createShop: self-serve shop creation.
-// WB token is optional and can be configured later from Settings (owner-only).
-export async function createShop(payload: { name: string; wb_token?: string | null } | string) {
-  const body = typeof payload === "string" ? { name: payload } : payload
+// WB token is required.
+export async function createShop(payload: { name: string; wb_token: string }) {
   return apiCall<ShopOut>("/api/shops", {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify({ name: payload.name, wb_token: payload.wb_token }),
   })
 }
 

@@ -50,6 +50,10 @@ export default function FeedbacksModule({ shopId }: { shopId: number | null }) {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [detailData, setDetailData] = useState<FeedbackDetail | null>(null)
+  const [detailIntent, setDetailIntent] = useState<{
+    initialTab: "review" | "answer"
+    autoFocusAnswer: boolean
+  }>({ initialTab: "review", autoFocusAnswer: false })
 
   // bulk draft
   const [bulkOpen, setBulkOpen] = useState(false)
@@ -210,6 +214,8 @@ export default function FeedbacksModule({ shopId }: { shopId: number | null }) {
 
   async function openDetail(wbId: string) {
     if (!shopId) return
+    const fromWaiting = section === "waiting"
+    setDetailIntent({ initialTab: fromWaiting ? "answer" : "review", autoFocusAnswer: fromWaiting })
     setDetailOpen(true)
     setDetailLoading(true)
     setDetailError(null)
@@ -409,6 +415,8 @@ export default function FeedbacksModule({ shopId }: { shopId: number | null }) {
         error={detailError}
         data={detailData}
         onReload={reloadDetail}
+        initialTab={detailIntent.initialTab}
+        autoFocusAnswer={detailIntent.autoFocusAnswer}
       />
 
       {/* Bulk draft dialog */}

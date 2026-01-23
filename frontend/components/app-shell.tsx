@@ -3,12 +3,11 @@
 import type React from "react"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 
 import Sidebar from "@/components/layout/sidebar"
 import { ShopProvider } from "@/components/shop-context"
 import { Button } from "@/components/ui/button"
-import CreateShopDialog from "@/components/create-shop-dialog"
 
 import { getBillingShop, listShops, getMe, type ShopOut, type ShopBilling } from "@/lib/api"
 import { clearAuthToken } from "@/lib/auth"
@@ -29,11 +28,14 @@ function roleLabel(role?: string) {
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter()
+  const pathname = usePathname()
 
   const [shops, setShops] = useState<ShopOut[]>([])
   const [selectedShopId, setSelectedShopId] = useState<number | null>(null)
-  const [loadingShops, setLoadingShops] = useState(false)
-  const [createOpen, setCreateOpen] = useState(false)
+  // Start in "loading" to avoid redirecting to onboarding before the first fetch.
+  const [loadingShops, setLoadingShops] = useState(true)
+  const [shopsLoaded, setShopsLoaded] = useState(false)
+  const [shopsError, setShopsError] = useState<string | null>(null)
 
   const [me, setMe] = useState<{ id: number; email: string; role: string } | null>(null)
 
@@ -60,6 +62,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const refresh = useCallback(async () => {
     // Load current user info + shops list.
     setLoadingShops(true)
+    setShopsError(null)
     try {
       try {
         const meData = await getMe()
@@ -79,8 +82,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       if (selectedShopId && data && !data.some((s) => s.id === selectedShopId)) {
         setSelectedShopId(data.length ? data[0].id : null)
       }
+    } catch (e: any) {
+      setShopsError(e?.message || "Не удалось загрузить список магазинов")
+      throw e
     } finally {
       setLoadingShops(false)
+      setShopsLoaded(true)
     }
   }, [selectedShopId])
 
@@ -99,6 +106,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       mounted = false
     }
   }, [refresh])
+
+  // If user has no shops yet, move them into the onboarding flow.
+  useEffect(() => {
+    if (!shopsLoaded || loadingShops) return
+    if (shopsError) return
+    if (shops.length === 0 && pathname.startsWith("/app") && pathname !== "/app/onboarding") {
+      router.replace("/app/onboarding")
+    }
+  }, [shopsLoaded, loadingShops, shopsError, shops.length, pathname, router])
 
   useEffect(() => {
     let mounted = true
@@ -136,13 +152,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     router.refresh()
   }
 
-  const handleCreated = async (shop: ShopOut) => {
-    // Refresh list and select newly created shop.
-    await refresh()
-    setSelectedShopId(shop.id)
-    router.refresh()
-  }
-
   const handleLogout = () => {
     clearAuthToken()
     router.push("/login")
@@ -159,10 +168,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         shopBilling={shopBilling}
         shopBillingLoading={shopBalanceLoading}
         canCreateShop={true}
-        onAddShop={() => setCreateOpen(true)}
+        onAddShop={() => router.push("/app/onboarding")}
       />
-
-      <CreateShopDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={handleCreated} />
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-card border-b border-border px-6 py-4">
@@ -216,9 +223,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 <div className="text-sm text-muted-foreground mb-4">
                   Создайте первый магазин — после этого вы сможете подключить токен WB и начать работу с отзывами/вопросами/чатами.
                 </div>
-                <Button onClick={() => setCreateOpen(true)}>
-                  Создать магазин
-                </Button>
+                <Button onClick={() => router.push("/app/onboarding")}>Создать магазин</Button>
               </div>
             ) : (
               <>{children}</>

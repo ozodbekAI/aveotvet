@@ -186,6 +186,24 @@ def validate_and_merge_config(existing_config: dict, new_config: dict) -> dict:
                 pass
         
         result["recommendations"] = updated_rec
+
+    # Process onboarding (UI-only)
+    if "onboarding" in new_config:
+        ob = new_config["onboarding"]
+        if not isinstance(ob, dict):
+            raise HTTPException(status_code=422, detail="config.onboarding must be an object")
+
+        existing_ob = result.get("onboarding", {})
+        updated_ob = existing_ob.copy() if isinstance(existing_ob, dict) else {}
+
+        for key in ("done", "dashboard_intro_seen"):
+            if key in ob:
+                try:
+                    updated_ob[key] = _coerce_bool(ob[key], field_path=f"onboarding.{key}")
+                except HTTPException:
+                    pass
+
+        result["onboarding"] = updated_ob
     
     return result
 

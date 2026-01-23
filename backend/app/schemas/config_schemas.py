@@ -140,12 +140,25 @@ class RecommendationsConfig(BaseModel):
         return AdvancedConfig._coerce_bool(v)
 
 
+class OnboardingConfig(BaseModel):
+    """Per-shop onboarding flags (UI-only)."""
+
+    done: bool | None = Field(default=None, description="Onboarding finished")
+    dashboard_intro_seen: bool | None = Field(default=None, description="Dashboard intro already shown")
+
+    @field_validator("done", "dashboard_intro_seen", mode="before")
+    @classmethod
+    def normalize_bools(cls, v: Any):
+        return AdvancedConfig._coerce_bool(v)
+
+
 class ConfigUpdate(BaseModel):
     """Full config structure for updates."""
 
     advanced: AdvancedConfig | None = None
     chat: ChatConfig | None = None
     recommendations: RecommendationsConfig | None = None
+    onboarding: OnboardingConfig | None = None
 
 
 class ConfigResponse(BaseModel):
@@ -154,3 +167,4 @@ class ConfigResponse(BaseModel):
     advanced: AdvancedConfig = Field(default_factory=AdvancedConfig)
     chat: ChatConfig = Field(default_factory=ChatConfig)
     recommendations: RecommendationsConfig = Field(default_factory=RecommendationsConfig)
+    onboarding: OnboardingConfig = Field(default_factory=OnboardingConfig)

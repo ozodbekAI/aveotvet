@@ -4,6 +4,7 @@ import { Star, Image as ImageIcon, MessageSquareText } from "lucide-react"
 
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 export type FeedbackRow = {
@@ -230,9 +231,17 @@ export default function FeedbacksFeed({
 
             <div className="mt-3 flex items-center justify-between">
               <div className="text-xs text-muted-foreground">Покупатель: {r.user_name || "—"}</div>
-              <div className="text-xs text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">
-                Открыть →
-              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="rounded-xl"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleOpen(r.wb_id)
+                }}
+              >
+                Открыть
+              </Button>
             </div>
           </div>
         )

@@ -29,6 +29,9 @@ class SignatureItem(BaseModel):
 class SettingsOut(BaseModel):
     shop_id: int
 
+    # Master run switch
+    automation_enabled: bool
+
     auto_sync: bool
     reply_mode: str
     auto_draft: bool
@@ -67,18 +70,21 @@ class SettingsOut(BaseModel):
             return {
                 "advanced": {},
                 "chat": {},
-                "recommendations": {}
+                "recommendations": {},
+                "onboarding": {},
             }
         
         result = {
             "advanced": v.get("advanced", {}),
             "chat": v.get("chat", {}),
-            "recommendations": v.get("recommendations", {})
+            "recommendations": v.get("recommendations", {}),
+            "onboarding": v.get("onboarding", {}),
         }
         return result
 
 
 class SettingsUpdate(BaseModel):
+    automation_enabled: bool | None = None
     auto_sync: bool | None = None
     reply_mode: str | None = Field(default=None, description="manual | semi | auto")
     auto_draft: bool | None = None

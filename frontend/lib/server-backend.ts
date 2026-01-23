@@ -5,7 +5,7 @@ import { AUTH_COOKIE_NAME } from "@/lib/auth-cookie"
 export type Me = { id: number; email: string; role: string }
 
 export function getBackendOrigin() {
-  return ("http://localhost:8000")
+  return ("https://aveotvet.ozodbek-akramov.uz/api")
 }
 
 export async function getTokenFromCookie(): Promise<string | null> {

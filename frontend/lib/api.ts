@@ -1,6 +1,6 @@
 import { getAuthToken } from "@/lib/auth"
 
-const API_BASE = "https://aveotvet.ozodbek-akramov.uz/api"
+const API_BASE = "https://aveotvet.ozodbek-akramov.uz"
 
 export async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== "undefined" ? getAuthToken() : null

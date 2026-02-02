@@ -1,8 +1,8 @@
 """news
 
-Revision ID: 3f6b94e050c7
+Revision ID: 5636f67a3eaa
 Revises: 
-Create Date: 2026-01-23 08:56:51.128919
+Create Date: 2026-02-02 16:48:24.358486
 
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
-revision = '3f6b94e050c7'
+revision = '5636f67a3eaa'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -81,6 +81,7 @@ def upgrade() -> None:
     sa.Column('label', sa.String(length=128), nullable=False),
     sa.Column('hint', sa.String(length=255), nullable=True),
     sa.Column('instruction', sa.Text(), nullable=True),
+    sa.Column('example', sa.Text(), nullable=True),
     sa.Column('sort_order', sa.Integer(), nullable=False),
     sa.Column('is_active', sa.Boolean(), nullable=False),
     sa.PrimaryKeyConstraint('id')

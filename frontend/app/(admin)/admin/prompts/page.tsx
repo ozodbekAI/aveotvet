@@ -43,6 +43,7 @@ type Tone = {
   label: string
   hint?: string | null
   instruction?: string | null
+  example?: string | null
   sort_order: number
   is_active: boolean
 }
@@ -107,6 +108,7 @@ function ToneDialog({
   const [label, setLabel] = React.useState(initial?.label || "")
   const [hint, setHint] = React.useState(initial?.hint || "")
   const [instruction, setInstruction] = React.useState(initial?.instruction || "")
+  const [example, setExample] = React.useState((initial?.example as any) || "")
   const [sortOrder, setSortOrder] = React.useState<number>(typeof initial?.sort_order === "number" ? initial!.sort_order : 0)
   const [isActive, setIsActive] = React.useState<boolean>(initial?.is_active ?? true)
   const [saving, setSaving] = React.useState(false)
@@ -117,6 +119,7 @@ function ToneDialog({
     setLabel(initial?.label || "")
     setHint((initial?.hint as any) || "")
     setInstruction((initial?.instruction as any) || "")
+    setExample((initial?.example as any) || "")
     setSortOrder(typeof initial?.sort_order === "number" ? initial!.sort_order : 0)
     setIsActive(initial?.is_active ?? true)
     setError(null)
@@ -141,6 +144,7 @@ function ToneDialog({
         label: label.trim(),
         hint: hint.trim() ? hint.trim() : null,
         instruction: instruction.trim() ? instruction.trim() : null,
+        example: example.trim() ? example.trim() : null,
         sort_order: Number.isFinite(sortOrder) ? sortOrder : 0,
         is_active: isActive,
       })
@@ -202,6 +206,19 @@ function ToneDialog({
             />
           </div>
 
+          <div className="col-span-2">
+            <Label className="text-foreground">Пример ответа (для UI)</Label>
+            <Textarea
+              value={example}
+              onChange={(e) => setExample(e.target.value)}
+              placeholder="Например: Спасибо за отзыв! Очень рады, что вам понравилось 😊"
+              className="mt-2 bg-input border-border text-foreground min-h-[90px]"
+            />
+            <div className="text-xs text-muted-foreground mt-1">
+              Этот пример показывается пользователю при выборе тональности.
+            </div>
+          </div>
+
           <div>
             <Label className="text-foreground">Порядок сортировки</Label>
             <Input
@@ -255,24 +272,6 @@ function OptionsWithRulesEditor({
     onChange(next, rules)
   }
 
-  const setValue = (idx: number, nextValueRaw: string) => {
-    const nextValue = nextValueRaw.trim().slice(0, 64)
-    const prevValue = options[idx]?.value || ""
-
-    const nextOptions = options.map((o, i) => (i === idx ? { ...o, value: nextValue } : o))
-
-    const nextRules = { ...(rules || {}) }
-    if (prevValue && prevValue !== nextValue) {
-      // migrate rule
-      if (nextValue && !(nextValue in nextRules) && prevValue in nextRules) {
-        nextRules[nextValue] = nextRules[prevValue]
-      }
-      delete nextRules[prevValue]
-    }
-
-    onChange(nextOptions, nextRules)
-  }
-
   const setRule = (value: string, text: string) => {
     const v = (value || "").trim()
     const nextRules = { ...(rules || {}) }
@@ -285,99 +284,53 @@ function OptionsWithRulesEditor({
     onChange(options, nextRules)
   }
 
-  const addRow = () => {
-    onChange([...options, { value: "", label: "", hint: "" }], rules)
-  }
-
-  const removeRow = (idx: number) => {
-    const v = options[idx]?.value
-    const nextOptions = options.filter((_, i) => i !== idx)
-    const nextRules = { ...(rules || {}) }
-    if (v) delete nextRules[v]
-    onChange(nextOptions, nextRules)
-  }
-
   return (
     <Card className="bg-card border-border">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle className="text-foreground">{title}</CardTitle>
-          {description ? <div className="text-sm text-muted-foreground mt-1">{description}</div> : null}
-        </div>
-        <Button onClick={addRow} className="bg-primary hover:bg-primary/90">
-          Добавить
-        </Button>
+      <CardHeader>
+        <CardTitle className="text-foreground">{title}</CardTitle>
+        {description ? <div className="text-sm text-muted-foreground mt-1">{description}</div> : null}
       </CardHeader>
-      <CardContent>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="min-w-[160px]">Value</TableHead>
-                <TableHead className="min-w-[220px]">Название</TableHead>
-                <TableHead className="min-w-[260px]">Подсказка</TableHead>
-                <TableHead className="min-w-[340px]">Правило (инструкция)</TableHead>
-                <TableHead className="text-right">Действия</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(options || []).map((o, idx) => (
-                <TableRow key={`${o.value}-${idx}`}>
-                  <TableCell>
-                    <Input
-                      value={o.value}
-                      onChange={(e) => setValue(idx, e.target.value)}
-                      placeholder="vy_caps"
-                      className="bg-input border-border text-foreground"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Input
-                      value={o.label}
-                      onChange={(e) => setOpt(idx, { label: e.target.value })}
-                      placeholder="Вы (с большой буквы)"
-                      className="bg-input border-border text-foreground"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Input
-                      value={o.hint || ""}
-                      onChange={(e) => setOpt(idx, { hint: e.target.value })}
-                      placeholder="Короткое описание в UI"
-                      className="bg-input border-border text-foreground"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Textarea
-                      value={o.value ? rules?.[o.value] || "" : ""}
-                      onChange={(e) => setRule(o.value, e.target.value)}
-                      placeholder="Например: Use formal second-person plural pronouns (Вы/Ваш/Вам)."
-                      className="bg-input border-border text-foreground min-h-[90px]"
-                      disabled={!o.value}
-                    />
-                    {!o.value ? <div className="text-xs text-muted-foreground mt-1">Сначала заполните value.</div> : null}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="destructive"
-                      className="bg-destructive/20 text-destructive hover:bg-destructive/30"
-                      onClick={() => removeRow(idx)}
-                    >
-                      Удалить
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {(!options || options.length === 0) ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
-                    Значения отсутствуют.
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-        </div>
+      <CardContent className="space-y-4">
+        {(options || []).map((o, idx) => (
+          <div key={`${o.value}-${idx}`} className="rounded-xl border border-border p-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1">Название</Label>
+                  <Input
+                    value={o.label}
+                    onChange={(e) => setOpt(idx, { label: e.target.value })}
+                    placeholder="Вы (с заглавной)"
+                    className="bg-input border-border text-foreground"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1">Подсказка для пользователя</Label>
+                  <Input
+                    value={o.hint || ""}
+                    onChange={(e) => setOpt(idx, { hint: e.target.value })}
+                    placeholder="Обращаться на 'Вы/Ваш/Вам' с заглавной буквы"
+                    className="bg-input border-border text-foreground"
+                  />
+                </div>
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1">Инструкция для GPT</Label>
+              <Textarea
+                value={o.value ? rules?.[o.value] || "" : ""}
+                onChange={(e) => setRule(o.value, e.target.value)}
+                placeholder="Например: Use formal second-person plural pronouns (Вы/Ваш/Вам)."
+                className="bg-input border-border text-foreground min-h-[80px]"
+              />
+            </div>
+          </div>
+        ))}
+        {(!options || options.length === 0) ? (
+          <div className="text-center text-sm text-muted-foreground py-4">
+            Значения отсутствуют.
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   )
@@ -437,6 +390,7 @@ export default function AdminPromptsPage() {
         label: payload.label,
         hint: payload.hint,
         instruction: payload.instruction,
+        example: payload.example,
         sort_order: payload.sort_order,
         is_active: payload.is_active,
       })
@@ -610,6 +564,7 @@ export default function AdminPromptsPage() {
                   <TableHead>Название</TableHead>
                   <TableHead>Активна</TableHead>
                   <TableHead className="min-w-[280px]">Инструкция</TableHead>
+                  <TableHead className="min-w-[260px]">Пример</TableHead>
                   <TableHead className="text-right">Действия</TableHead>
                 </TableRow>
               </TableHeader>
@@ -623,6 +578,7 @@ export default function AdminPromptsPage() {
                     </TableCell>
                     <TableCell>{t.is_active ? "Да" : "Нет"}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{(t.instruction || "").slice(0, 120)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{(t.example || "").slice(0, 120)}</TableCell>
                     <TableCell className="text-right space-x-2">
                       <Button
                         variant="outline"
@@ -646,7 +602,7 @@ export default function AdminPromptsPage() {
                 ))}
                 {(!tones || tones.length === 0) && !loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground">
                       Тональности отсутствуют.
                     </TableCell>
                   </TableRow>

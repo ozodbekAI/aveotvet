@@ -2,7 +2,7 @@
 
 import * as React from "react"
 
-import { ExternalLink, Save, Send, Sparkles, Star, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, ExternalLink, Save, Send, Sparkles, Star, ThumbsDown, ThumbsUp, X } from "lucide-react"
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -10,7 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useToast } from "@/components/ui/use-toast"
 import { useScrollLock } from "@/hooks/use-scroll-lock"
 
@@ -34,7 +33,8 @@ export type FeedbackDetail = {
   answer_text?: string | null
   answer_editable?: boolean | null
   product_details?: any | null
-  photo_links?: string[] | null
+  product_image_url?: string | null
+  photo_links?: Array<string | { fullSize?: string; miniSize?: string }> | null
   video?: any | null
   bables?: string[] | null
   raw?: any | null
@@ -97,6 +97,11 @@ export default function FeedbackDetailDialog({
   onPublished,
   initialTab = "review",
   autoFocusAnswer = false,
+  // Navigation props
+  currentIndex,
+  totalCount,
+  onPrev,
+  onNext,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -108,12 +113,16 @@ export default function FeedbackDetailDialog({
   onPublished?: () => Promise<void> | void
   initialTab?: "review" | "answer"
   autoFocusAnswer?: boolean
+  // Navigation props
+  currentIndex?: number
+  totalCount?: number
+  onPrev?: () => void
+  onNext?: () => void
 }) {
   const { toast } = useToast()
   useScrollLock(open)
 
   const answerRef = React.useRef<HTMLTextAreaElement | null>(null)
-  const [tab, setTab] = React.useState<"review" | "answer">(initialTab)
 
   const [answerText, setAnswerText] = React.useState("")
   const [draftId, setDraftId] = React.useState<number | null>(null)
@@ -122,22 +131,15 @@ export default function FeedbackDetailDialog({
 
   const isAnswered = Boolean((data?.answer_text || "").trim())
 
-  // When opened from "Ожидают ответа": switch to answer tab and focus the textarea.
-  React.useEffect(() => {
-    if (!open) return
-    const next = autoFocusAnswer ? "answer" : initialTab
-    setTab(next)
-  }, [open, autoFocusAnswer, initialTab])
-
+  // Focus the answer textarea when opened from "Ожидают ответа"
   React.useEffect(() => {
     if (!open) return
     if (!autoFocusAnswer) return
-    if (tab !== "answer") return
     const t = window.setTimeout(() => {
       answerRef.current?.focus()
     }, 80)
     return () => window.clearTimeout(t)
-  }, [open, autoFocusAnswer, tab])
+  }, [open, autoFocusAnswer])
 
   React.useEffect(() => {
     if (!open) return
@@ -253,188 +255,45 @@ export default function FeedbackDetailDialog({
     }
   }
 
-  const headerMeta = (
-    <div className="text-xs text-muted-foreground mt-1 flex flex-wrap items-center gap-2">
-      {brandName ? <span>{brandName}</span> : null}
-      {brandName && nmId ? <span>·</span> : null}
-      {nmId ? <span>#{nmId}</span> : null}
-    </div>
-  )
+  const hasNavigation = typeof currentIndex === "number" && typeof totalCount === "number" && totalCount > 0
+  const canGoPrev = hasNavigation && currentIndex > 0
+  const canGoNext = hasNavigation && currentIndex < totalCount - 1
 
-  const reviewNode = !data ? null : (
-    <div className="space-y-5">
-      <Card className="rounded-2xl">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Детали</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <RatingStars value={ratingValue(data)} />
-              <div className="text-sm font-semibold text-foreground">{Number(data.product_valuation || 0) || 0}/5</div>
-            </div>
-
-            {nmId ? (
-              <a
-                href={`https://www.wildberries.ru/catalog/${nmId}/detail.aspx`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 text-sm text-primary hover:opacity-80"
-              >
-                <ExternalLink className="h-4 w-4" />
-                Открыть на WB
-              </a>
-            ) : null}
-          </div>
-
-          <Separator />
-
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <div className="text-xs text-muted-foreground">Покупатель</div>
-              <div className="font-medium text-foreground">{safeText(data.user_name)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Дата</div>
-              <div className="font-medium text-foreground">{fmtDateTime(data.created_date)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Размер</div>
-              <div className="font-medium text-foreground">{safeText(sizeText)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-muted-foreground">Цвет</div>
-              <div className="font-medium text-foreground">{safeText(colorText)}</div>
-            </div>
-          </div>
-
-          {Array.isArray(data.bables) && data.bables.length > 0 ? (
-            <>
-              <Separator />
-              <div>
-                <div className="text-xs text-muted-foreground mb-2">Характеристики</div>
-                <div className="flex flex-wrap gap-2">
-                  {data.bables.slice(0, 24).map((t, i) => (
-                    <Badge key={`${t}-${i}`} variant="secondary" className="max-w-full truncate rounded-xl">
-                      {String(t)}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            </>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-2xl">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Текст отзыва</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="text-sm text-foreground whitespace-pre-wrap break-words">{safeText(data.text)}</div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="rounded-xl border border-border p-3 bg-muted/30">
-              <div className="text-xs font-semibold text-foreground">Плюсы</div>
-              <div className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap break-words">{safeText(data.pros)}</div>
-            </div>
-            <div className="rounded-xl border border-border p-3 bg-muted/30">
-              <div className="text-xs font-semibold text-foreground">Минусы</div>
-              <div className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap break-words">{safeText(data.cons)}</div>
-            </div>
-          </div>
-
-          {!!(data.photo_links && data.photo_links.length) ? (
-            <>
-              <Separator />
-              <div>
-                <div className="text-xs font-semibold text-foreground mb-2">Фото ({data.photo_links.length})</div>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                  {data.photo_links.slice(0, 12).map((url, i) => (
-                    <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="block">
-                      <img src={url} alt={`photo-${i}`} className="h-20 w-full object-cover rounded-xl border border-border" />
-                    </a>
-                  ))}
-                </div>
-              </div>
-            </>
-          ) : null}
-        </CardContent>
-      </Card>
-    </div>
-  )
-
-  const answerNode = !data ? null : (
-    <div className="space-y-5">
-      <Card className="rounded-2xl">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Ответ</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="text-xs text-muted-foreground">
-            Статус: {data.answer_text ? "Отвечено" : "Ожидает ответа"}
-          </div>
-
-          <Textarea
-            ref={answerRef}
-            value={answerText}
-            onChange={(e) => setAnswerText(e.target.value)}
-            placeholder="Напишите ответ или сгенерируйте черновик"
-            className="min-h-[160px] rounded-xl"
-            disabled={!canAct || action === "publish"}
-          />
-
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Символов: {answerText.length}</span>
-            {actionError ? <span className="text-destructive">{actionError}</span> : <span />}
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={doDraft} disabled={!canAct || action !== null || isAnswered} className="gap-2">
-              <Sparkles className="h-4 w-4" />
-              Сгенерировать
-            </Button>
-
-            <Button variant="outline" onClick={doSave} disabled={!canAct || action !== null || !answerText.trim()} className="gap-2">
-              <Save className="h-4 w-4" />
-              Сохранить
-            </Button>
-
-            <Button onClick={doPublish} disabled={!canAct || action !== null || !answerText.trim()} className="gap-2">
-              <Send className="h-4 w-4" />
-              {isAnswered ? "Обновить" : "Опубликовать"}
-            </Button>
-          </div>
-
-          {!canAct ? (
-            <div className="text-xs text-muted-foreground">
-              Действия недоступны: выберите магазин и убедитесь, что у роли есть права на ответы.
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-2xl">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Подсказка</CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          Рекомендуется сохранять черновик перед публикацией. При автогенерации учитывается баланс магазина и лимиты в настройках.
-        </CardContent>
-      </Card>
-    </div>
-  )
+  // Keyboard navigation
+  React.useEffect(() => {
+    if (!open || !hasNavigation) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft" && canGoPrev) {
+        e.preventDefault()
+        onPrev?.()
+      } else if (e.key === "ArrowRight" && canGoNext) {
+        e.preventDefault()
+        onNext?.()
+      } else if (e.key === "g" && !e.ctrlKey && !e.metaKey) {
+        // G for generate
+        if (canAct && !action && !isAnswered) {
+          e.preventDefault()
+          doDraft()
+        }
+      } else if (e.key === "Escape") {
+        e.preventDefault()
+        onOpenChange(false)
+      }
+    }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [open, hasNavigation, canGoPrev, canGoNext, onPrev, onNext, canAct, action, isAnswered, onOpenChange])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="
-          w-[96vw] max-w-4xl
-          sm:w-[96vw] sm:max-w-4xl
-          h-[85vh] max-h-[85vh]
+          w-[96vw] max-w-5xl
+          sm:w-[96vw] sm:max-w-5xl
+          h-[90vh] max-h-[90vh]
           overflow-hidden
           p-0
-          grid grid-rows-[auto,1fr]
+          flex flex-col
           gap-0
         "
       >
@@ -442,73 +301,240 @@ export default function FeedbackDetailDialog({
           <DialogTitle>Отзыв</DialogTitle>
         </DialogHeader>
 
-        {/* Header */}
-        <div>
-          <div className="h-1 wb-accent-bar" />
-          <div className="flex items-start justify-between gap-4 px-5 py-4 bg-card">
-            <div className="flex items-start gap-3 min-w-0">
-              <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary border border-primary/10 flex items-center justify-center shrink-0">
-                <Star className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-xs text-muted-foreground">Отзыв</div>
-                <div className="text-lg font-semibold leading-snug line-clamp-2 text-foreground">{data ? productName : "—"}</div>
-                {data ? headerMeta : null}
-              </div>
-            </div>
-
+        {/* Navigation Header */}
+        {hasNavigation && (
+          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
             <Button
-              type="button"
               variant="ghost"
-              size="icon-sm"
-              onClick={() => onOpenChange(false)}
-              className="rounded-xl"
-              aria-label="Close"
+              size="sm"
+              onClick={onPrev}
+              disabled={!canGoPrev || loading}
+              className="gap-1 text-muted-foreground hover:text-foreground"
             >
-              <X className="h-4 w-4" />
+              <ChevronLeft className="h-4 w-4" />
+              Предыдущий
+            </Button>
+            <div className="text-sm text-muted-foreground">
+              {currentIndex + 1} из {totalCount}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onNext}
+              disabled={!canGoNext || loading}
+              className="gap-1 text-muted-foreground hover:text-foreground"
+            >
+              Следующий
+              <ChevronRight className="h-4 w-4" />
             </Button>
           </div>
-        </div>
+        )}
 
-        {/* Body */}
-        <div className="min-h-0 h-full overflow-y-auto p-4">
-
+        {/* Main content */}
+        <div className="flex-1 min-h-0 overflow-hidden flex">
           {loading ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">Загрузка…</div>
+            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">Загрузка…</div>
           ) : error ? (
-            <div className="py-10 text-center">
+            <div className="flex-1 flex items-center justify-center">
               <div className="text-sm text-destructive">{error}</div>
             </div>
           ) : !data ? (
-            <div className="py-10 text-center text-sm text-muted-foreground">Нет данных</div>
+            <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">Нет данных</div>
           ) : (
-            <>
-              {/* Mobile: tabs to avoid "long" ugly column */}
-              <div className="lg:hidden">
-                <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="w-full">
-                  <TabsList className="w-full rounded-xl bg-muted/60">
-                    <TabsTrigger value="review" className="flex-1 rounded-lg">
-                      Отзыв
-                    </TabsTrigger>
-                    <TabsTrigger value="answer" className="flex-1 rounded-lg">
-                      Ответ
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="review" className="mt-4">
-                    {reviewNode}
-                  </TabsContent>
-                  <TabsContent value="answer" className="mt-4">
-                    {answerNode}
-                  </TabsContent>
-                </Tabs>
+            <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 min-h-0 overflow-hidden">
+              {/* Left: Review details */}
+              <div className="border-r border-border overflow-y-auto p-5 space-y-4">
+                {/* Product info */}
+                <div className="flex items-start gap-3">
+                  {pd?.img || data.product_image_url ? (
+                    <img
+                      src={pd?.img || data.product_image_url}
+                      alt=""
+                      className="w-12 h-12 rounded-lg object-cover border border-border"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
+                      <Star className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-foreground leading-tight line-clamp-2">
+                      {productName}
+                    </h3>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {brandName && <span>{brandName} · </span>}
+                      {nmId && <span>#{nmId}</span>}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Rating and WB link */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <RatingStars value={ratingValue(data)} />
+                    <span className="text-sm font-medium text-foreground">
+                      {Number(data.product_valuation || 0)}/5
+                    </span>
+                  </div>
+                  {nmId ? (
+                    <a
+                      href={`https://www.wildberries.ru/catalog/${nmId}/detail.aspx`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Открыть на WB
+                    </a>
+                  ) : null}
+                </div>
+
+                <Separator />
+
+                {/* Customer info */}
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <div className="text-xs text-muted-foreground">Покупатель</div>
+                    <div className="font-medium text-foreground">{safeText(data.user_name)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Дата</div>
+                    <div className="font-medium text-foreground">{fmtDateTime(data.created_date)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Размер</div>
+                    <div className="font-medium text-foreground">{safeText(sizeText)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">Цвет</div>
+                    <div className="font-medium text-foreground">{safeText(colorText)}</div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Review text */}
+                <div>
+                  <div className="text-xs text-muted-foreground mb-2">Текст отзыва</div>
+                  <p className="text-sm text-foreground whitespace-pre-wrap">{safeText(data.text)}</p>
+                </div>
+
+                {/* Pros and cons */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900 p-3">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-green-700 dark:text-green-400 mb-1">
+                      <ThumbsUp className="h-3.5 w-3.5" />
+                      Плюсы
+                    </div>
+                    <div className="text-sm text-green-800 dark:text-green-300">{safeText(data.pros)}</div>
+                  </div>
+                  <div className="rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 p-3">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-red-700 dark:text-red-400 mb-1">
+                      <ThumbsDown className="h-3.5 w-3.5" />
+                      Минусы
+                    </div>
+                    <div className="text-sm text-red-800 dark:text-red-300">{safeText(data.cons)}</div>
+                  </div>
+                </div>
+
+                {/* Photos */}
+                {!!(data.photo_links && data.photo_links.length) && (
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-2">Фото ({data.photo_links.length})</div>
+                    <div className="flex gap-2 flex-wrap">
+                      {data.photo_links.slice(0, 6).map((link, i) => {
+                        // Support both string URLs and {fullSize, miniSize} objects
+                        const fullUrl = typeof link === 'string' ? link : (link as any)?.fullSize || (link as any)?.miniSize
+                        const thumbUrl = typeof link === 'string' ? link : (link as any)?.miniSize || (link as any)?.fullSize
+                        if (!fullUrl) return null
+                        return (
+                          <a key={i} href={fullUrl} target="_blank" rel="noopener noreferrer">
+                            <img
+                              src={thumbUrl}
+                              alt=""
+                              className="h-16 w-16 object-cover rounded-lg border border-border hover:opacity-80 transition-opacity"
+                            />
+                          </a>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* Desktop: comfortable two-column */}
-              <div className="hidden lg:grid grid-cols-12 gap-5 items-start">
-                <div className="col-span-7">{reviewNode}</div>
-                <div className="col-span-5 lg:sticky lg:top-5 self-start">{answerNode}</div>
+              {/* Right: Answer section */}
+              <div className="overflow-y-auto p-5 flex flex-col">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-foreground">Ваш ответ</h3>
+                  <Badge variant={isAnswered ? "default" : "secondary"} className="text-xs">
+                    {isAnswered ? "Опубликован" : "Ожидает ответа"}
+                  </Badge>
+                </div>
+
+                <Textarea
+                  ref={answerRef}
+                  value={answerText}
+                  onChange={(e) => setAnswerText(e.target.value)}
+                  placeholder="Напишите ответ или сгенерируйте черновик..."
+                  className="flex-1 min-h-[120px] max-h-[180px] rounded-xl resize-none text-sm"
+                  disabled={!canAct || action === "publish"}
+                />
+
+                <div className="flex items-center justify-between text-xs text-muted-foreground mt-2 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => setAnswerText("")}
+                    className="hover:text-foreground transition-colors"
+                    disabled={!answerText}
+                  >
+                    ↺ Сбросить
+                  </button>
+                  <span>{answerText.length} символов</span>
+                </div>
+
+                {actionError && (
+                  <div className="text-xs text-destructive mb-3">{actionError}</div>
+                )}
+
+                <div className="space-y-2">
+                  <Button
+                    variant="outline"
+                    onClick={doDraft}
+                    disabled={!canAct || action !== null || isAnswered}
+                    className="w-full justify-center gap-2"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Сгенерировать ответ
+                    <span className="text-xs text-muted-foreground ml-auto">G</span>
+                  </Button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={doSave}
+                      disabled={!canAct || action !== null || !answerText.trim()}
+                      className="gap-2"
+                    >
+                      <Save className="h-4 w-4" />
+                      Черновик
+                    </Button>
+
+                    <Button
+                      onClick={doPublish}
+                      disabled={!canAct || action !== null || !answerText.trim()}
+                      className="gap-2 bg-primary hover:bg-primary/90"
+                    >
+                      <Send className="h-4 w-4" />
+                      Опубликовать
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mt-4 text-xs text-muted-foreground text-center">
+                  ← → для навигации • G для генерации • Esc для закрытия
+                </div>
               </div>
-            </>
+            </div>
           )}
         </div>
       </DialogContent>

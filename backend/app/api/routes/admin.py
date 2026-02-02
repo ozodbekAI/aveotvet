@@ -382,6 +382,7 @@ async def list_tones(db: AsyncSession = Depends(get_db), user=Depends(get_curren
             "label": t.label,
             "hint": t.hint,
             "instruction": t.instruction,
+            "example": getattr(t, "example", None),
             "sort_order": t.sort_order,
             "is_active": t.is_active,
         }
@@ -404,6 +405,7 @@ async def create_tone(payload: ToneCreate, db: AsyncSession = Depends(get_db), u
         label=payload.label,
         hint=payload.hint,
         instruction=payload.instruction,
+        example=payload.example,
         sort_order=payload.sort_order,
         is_active=payload.is_active,
     )

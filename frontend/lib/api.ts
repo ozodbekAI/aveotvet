@@ -1,6 +1,6 @@
 import { getAuthToken } from "@/lib/auth"
 
-const API_BASE = "https://aveotvet.ozodbek-akramov.uz"
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "https://aveotvet.ozodbek-akramov.uz"
 
 export async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== "undefined" ? getAuthToken() : null
@@ -14,7 +14,6 @@ export async function apiCall<T>(endpoint: string, options: RequestInit = {}): P
     Object.assign(headers, options.headers)
   }
 
-  // Only set JSON content type when body is not FormData.
   const hasContentType = Object.keys(headers).some((k) => k.toLowerCase() === "content-type")
   if (!hasContentType && options.body && !(options.body instanceof FormData)) {
     headers["Content-Type"] = "application/json"
@@ -82,7 +81,7 @@ export async function register(email: string, password: string) {
 
 // Prompts (global)
 export async function getToneOptions() {
-  return apiCall<Array<{ value: string; label: string; hint?: string }>>("/api/prompts/tone-options")
+  return apiCall<Array<{ value: string; label: string; hint?: string | null; example?: string | null }>>("/api/prompts/tone-options")
 }
 
 export async function getMe() {
@@ -113,7 +112,18 @@ export async function adminUpdatePrompts(payload: any) {
 }
 
 export async function adminListTones() {
-  return apiCall<Array<{ id: number; code: string; label: string; hint?: string | null; instruction?: string | null; sort_order: number; is_active: boolean }>>(
+  return apiCall<
+    Array<{
+      id: number
+      code: string
+      label: string
+      hint?: string | null
+      instruction?: string | null
+      example?: string | null
+      sort_order: number
+      is_active: boolean
+    }>
+  >(
     "/api/admin/tones"
   )
 }
@@ -282,6 +292,22 @@ export async function getShop(shopId: number) {
   return apiCall<ShopOut>(`/api/shops/${shopId}`)
 }
 
+export type VerifyWbTokenOut = {
+  ok: boolean
+  name?: string | null
+  sid?: string | null
+  tradeMark?: string | null
+  shop_name?: string | null
+}
+
+// Verify WB token via backend (calls WB common-api seller-info).
+export async function verifyWbToken(wb_token: string) {
+  return apiCall<VerifyWbTokenOut>("/api/shops/verify-token", {
+    method: "POST",
+    body: JSON.stringify({ wb_token }),
+  })
+}
+
 // Canonical brands (WB analytics API proxied by backend)
 export async function getShopBrands(shopId: number) {
   return apiCall<{ data: string[]; cached?: boolean }>(`/api/shops/${shopId}/brands`)
@@ -289,10 +315,10 @@ export async function getShopBrands(shopId: number) {
 
 // createShop: self-serve shop creation.
 // WB token is required.
-export async function createShop(payload: { name: string; wb_token: string }) {
+export async function createShop(payload: { wb_token: string; name?: string | null }) {
   return apiCall<ShopOut>("/api/shops", {
     method: "POST",
-    body: JSON.stringify({ name: payload.name, wb_token: payload.wb_token }),
+    body: JSON.stringify({ wb_token: payload.wb_token, name: payload.name || null }),
   })
 }
 
@@ -308,6 +334,11 @@ export async function updateSettings(shopId: number, data: any) {
   })
 }
 
+// Preview examples (onboarding)
+export async function getReviewPreviews(shopId: number) {
+  return apiCall(`/api/settings/${shopId}/preview/reviews`)
+}
+
 // Feedbacks
 export async function listFeedbacks(shopId: number, filters?: any) {
   const params = new URLSearchParams()
@@ -319,6 +350,21 @@ export async function listFeedbacks(shopId: number, filters?: any) {
     })
   }
   return apiCall(`/api/feedbacks/${shopId}?${params}`)
+}
+
+export interface ProductAnalyticsItem {
+  name: string
+  count: number
+  recent: number
+}
+
+export interface ProductAnalytics {
+  top_products: ProductAnalyticsItem[]
+  problem_products: ProductAnalyticsItem[]
+}
+
+export async function getFeedbackProductAnalytics(shopId: number, limit = 5): Promise<ProductAnalytics> {
+  return apiCall(`/api/feedbacks/${shopId}/analytics/products?limit=${limit}`)
 }
 
 export async function getFeedback(shopId: number, wbId: string) {
@@ -355,8 +401,51 @@ export type DashboardKpis = {
   pending: number
   unanswered: number
   answered: number
+  draftsReady: number
   avgRating: number
   positiveShare: number
+  // Extended stats for tooltips
+  processedBySystem?: number
+  periodGrowth?: number
+  awaitingProcessing?: number
+  closed?: number
+  active?: number
+  negativeWaiting24h?: number
+}
+
+export type RatingDistribution = {
+  stars5: number
+  stars4: number
+  stars3: number
+  stars2: number
+  stars1: number
+  stars5Growth: number
+  stars4Growth: number
+  stars3Growth: number
+  stars2Growth: number
+  stars1Growth: number
+  totalRated: number
+}
+
+export type AttentionItem = {
+  type: string
+  count: number
+  title: string
+  subtitle: string
+  severity: "high" | "medium" | "low"
+  link: string
+}
+
+export type DashboardMainOut = {
+  feedbacks: DashboardKpis
+  questions: DashboardKpis
+  chats: DashboardKpis
+  attentionItems: AttentionItem[]
+  ratingDistribution: RatingDistribution | null
+  automationStatus: string
+  automationMode: string
+  syncInterval: string
+  lastSyncAt: string | null
 }
 
 export type DashboardLinePoint = { d: string; v: number }
@@ -407,6 +496,22 @@ export async function syncDashboard(tab: DashboardTabKey, params?: { shop_id?: n
   const q = qs.toString()
   return apiCall<DashboardSyncOut>(`/api/dashboard/${tab}/sync${q ? `?${q}` : ""}`, { method: "POST" })
 }
+
+export async function getDashboardMain(params?: { shop_id?: number | null; period?: string }) {
+  const qs = new URLSearchParams()
+  if (params?.shop_id !== undefined && params?.shop_id !== null) qs.set("shop_id", String(params.shop_id))
+  if (params?.period) qs.set("period", String(params.period))
+  const q = qs.toString()
+  return apiCall<DashboardMainOut>(`/api/dashboard/main${q ? `?${q}` : ""}`)
+}
+
+export async function syncDashboardAll(params?: { shop_id?: number | null }) {
+  const qs = new URLSearchParams()
+  if (params?.shop_id !== undefined && params?.shop_id !== null) qs.set("shop_id", String(params.shop_id))
+  const q = qs.toString()
+  return apiCall<DashboardSyncOut>(`/api/dashboard/sync-all${q ? `?${q}` : ""}`, { method: "POST" })
+}
+
 export type DraftCreateResponse = {
   draft_id: number
   status: string

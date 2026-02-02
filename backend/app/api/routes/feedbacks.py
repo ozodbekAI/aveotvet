@@ -90,7 +90,7 @@ async def bulk_draft(
     fbs = await FeedbackRepo(db).list_unanswered_without_drafts(shop_id=shop_id, limit=cap)
     job_repo = JobRepo(db)
     for fb in fbs:
-        await job_repo.enqueue(JobType.generate_draft.value, {"shop_id": shop_id, "feedback_id": fb.id})
+        await job_repo.enqueue(JobType.generate_draft.value, {"shop_id": shop_id, "feedback_id": fb.id, "source": "bulk"})
 
     await db.commit()
     return BulkDraftResponse(queued=len(fbs), skipped_existing=0, limited_by_balance=limited_by_balance)
@@ -107,7 +107,9 @@ async def list_feedbacks(
     # Extra filters (to match frontend UI)
     date_from_unix: int | None = Query(default=None, description="Unix seconds (inclusive)"),
     date_to_unix: int | None = Query(default=None, description="Unix seconds (inclusive)"),
-    rating: int | None = Query(default=None, ge=1, le=5),
+    rating: int | None = Query(default=None, ge=1, le=5, description="Exact rating (deprecated, use rating_min/rating_max)"),
+    rating_min: int | None = Query(default=None, ge=1, le=5, description="Minimum rating (inclusive)"),
+    rating_max: int | None = Query(default=None, ge=1, le=5, description="Maximum rating (inclusive)"),
     has_text: bool | None = Query(default=None),
     has_media: bool | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
@@ -125,6 +127,8 @@ async def list_feedbacks(
         date_from_unix=date_from_unix,
         date_to_unix=date_to_unix,
         rating=rating,
+        rating_min=rating_min,
+        rating_max=rating_max,
         has_text=has_text,
         has_media=has_media,
         limit=limit,
@@ -179,6 +183,23 @@ async def list_feedbacks(
 
     response.headers["X-Total-Count"] = str(total)
     return rows
+
+
+@router.get("/{shop_id}/analytics/products")
+async def get_product_analytics(
+    shop_id: int,
+    request: Request,
+    limit: int = Query(default=5, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    """
+    Get product analytics: top products (4-5 star reviews) and problem products (1-2 star reviews).
+    """
+    await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)
+    
+    analytics = await FeedbackRepo(db).get_product_analytics(shop_id=shop_id, limit=limit)
+    return analytics
 
 
 @router.get("/{shop_id}/{wb_id}", response_model=FeedbackDetail)

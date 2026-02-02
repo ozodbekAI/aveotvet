@@ -18,5 +18,9 @@ class Tone(Base):
 
     instruction = Column(Text, nullable=True)
 
+    # UI example shown to users during onboarding / settings selection.
+    # Kept separate from instruction (which is an internal system prompt).
+    example = Column(Text, nullable=True)
+
     sort_order = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)

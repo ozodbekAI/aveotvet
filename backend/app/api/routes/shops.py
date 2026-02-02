@@ -14,7 +14,8 @@ from app.repos.user_repo import UserRepo
 from app.core.crypto import encrypt_secret, decrypt_secret
 from app.services.wb_analytics_client import WBAnalyticsClient, cache_get, cache_set
 from app.repos.shop_repo import ShopRepo
-from app.schemas.shop import ShopCreate, ShopOut
+from app.schemas.shop import ShopCreate, ShopOut, ShopTokenVerifyIn, ShopTokenVerifyOut
+from app.services.wb_common_client import WBCommonClient, WBCommonApiError
 
 router = APIRouter()
 
@@ -48,10 +49,68 @@ async def list_shops(db: AsyncSession = Depends(get_db), user=Depends(get_curren
 async def create_shop(payload: ShopCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     # await require_admin_write(user)
 
+    # Check if this token is already used by another shop
+    existing_shops = await db.execute(select(Shop).where(Shop.is_active.is_(True)))
+    for shop in existing_shops.scalars().all():
+        if shop.wb_token_enc:
+            try:
+                existing_token = decrypt_secret(shop.wb_token_enc)
+                if existing_token == payload.wb_token:
+                    raise HTTPException(
+                        status_code=409, 
+                        detail=f"Этот токен уже используется магазином «{shop.name}». Один токен можно использовать только для одного магазина."
+                    )
+            except Exception:
+                # Skip shops with invalid/corrupted tokens
+                pass
+
+    # Auto-detect shop name from WB seller-info (Common API).
+    shop_name: str | None = None
+    client = WBCommonClient(token=payload.wb_token)
+    try:
+        info = await client.seller_info()
+        trade = (info.get("tradeMark") or "").strip() if isinstance(info, dict) else ""
+        nm = (info.get("name") or "").strip() if isinstance(info, dict) else ""
+        shop_name = trade or nm
+    except WBCommonApiError as e:
+        # Invalid token or WB outage.
+        raise HTTPException(status_code=422, detail=f"WB token invalid or seller-info unavailable ({getattr(e, 'status_code', None)})")
+    finally:
+        await client.aclose()
+
+    if not shop_name:
+        # Fallback to provided name if WB did not return a usable value.
+        shop_name = (payload.name or "").strip() or None
+
+    if not shop_name:
+        raise HTTPException(status_code=422, detail="Не удалось определить название магазина по токену")
+
     repo = ShopRepo(db)
-    shop = await repo.create(owner_user_id=user.id, name=payload.name, wb_token_enc=encrypt_secret(payload.wb_token))
+    shop = await repo.create(owner_user_id=user.id, name=shop_name, wb_token_enc=encrypt_secret(payload.wb_token))
     await db.commit()
     return shop
+
+
+@router.post("/verify-token", response_model=ShopTokenVerifyOut)
+async def verify_shop_token(payload: ShopTokenVerifyIn, user=Depends(get_current_user)):
+    """Verify WB token and return seller-info.
+
+    Used by onboarding: user inputs token only, we auto-fetch shop name.
+    """
+
+    client = WBCommonClient(token=payload.wb_token)
+    try:
+        info = await client.seller_info()
+    except WBCommonApiError as e:
+        return ShopTokenVerifyOut(ok=False, name=None, sid=None, tradeMark=None, shop_name=None)
+    finally:
+        await client.aclose()
+
+    trade = (info.get("tradeMark") or "").strip() if isinstance(info, dict) else ""
+    nm = (info.get("name") or "").strip() if isinstance(info, dict) else ""
+    sid = (info.get("sid") or "").strip() if isinstance(info, dict) else ""
+    shop_name = trade or nm or None
+    return ShopTokenVerifyOut(ok=True, name=nm or None, sid=sid or None, tradeMark=trade or None, shop_name=shop_name)
 
 
 @router.get("/{shop_id}", response_model=ShopOut)

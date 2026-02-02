@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { RefreshCw, Search } from "lucide-react"
 import FeedbackDetail from "./feedback-detail"
-import { listFeedbacks } from "@/lib/api"
+import { listFeedbacks, syncFeedbacks } from "@/lib/api"
 
 interface FeedbackItem {
   wb_id: string
@@ -53,20 +53,14 @@ export default function FeedbackList({ shopId, token }: FeedbackListProps) {
   }
 
   const handleSync = async () => {
-    // Avto-sync backend worker orqali ketadi. Bu tugma faqat DB’dan qayta yuklaydi.
     setIsSyncing(true)
     try {
-      await fetchFeedbacks()
-    } finally {
-      setIsSyncing(false)
-    }
-  }
-        } catch (err) {
-          clearInterval(interval)
-        }
-      }, 2000)
+      // Ask backend to sync feedbacks from WB, then reload local list.
+      await syncFeedbacks(shopId)
+      await loadFeedbacks()
     } catch (err) {
       console.error("Sync failed:", err)
+    } finally {
       setIsSyncing(false)
     }
   }

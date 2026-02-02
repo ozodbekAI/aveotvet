@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
-import { createShop } from "@/lib/api"
+import { createShop, verifyWbToken } from "@/lib/api"
 
 type ShopOut = {
   id: number
@@ -30,31 +30,55 @@ export default function CreateShopDialog({ onCreated, trigger, defaultOpen, open
     onOpenChange?.(v)
     if (!isControlled) setInternalOpen(v)
   }
-  const [name, setName] = React.useState("")
   const [wbToken, setWbToken] = React.useState("")
+  const [resolvedName, setResolvedName] = React.useState("")
+  const [verifying, setVerifying] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 
-  const submit = async () => {
-    const n = name.trim()
+  const verify = async () => {
     const t = wbToken.trim()
-    
-    if (!n) {
-      setError("Введите название магазина")
-      return
-    }
-    
     if (!t) {
       setError("Введите WB токен")
+      return
+    }
+    try {
+      setVerifying(true)
+      setError(null)
+      const info = await verifyWbToken(t)
+      const shopName = String(info?.shop_name || info?.tradeMark || info?.name || "").trim()
+      if (!info?.ok || !shopName) {
+        setResolvedName("")
+        setError("Токен не подошёл. Проверьте доступ к API в кабинете WB.")
+        return
+      }
+      setResolvedName(shopName)
+    } catch (e: any) {
+      setError(e?.message || "Не удалось проверить токен")
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  const submit = async () => {
+    const t = wbToken.trim()
+
+    if (!t) {
+      setError("Введите WB токен")
+      return
+    }
+
+    if (!resolvedName) {
+      setError("Сначала нажмите «Проверить токен», чтобы подтянуть название магазина")
       return
     }
     
     try {
       setLoading(true)
       setError(null)
-      const shop = await createShop({ name: n, wb_token: t })
-      setName("")
+      const shop = await createShop({ wb_token: t })
       setWbToken("")
+      setResolvedName("")
       setOpen(false)
       onCreated?.(shop as ShopOut)
     } catch (e: any) {
@@ -70,26 +94,23 @@ export default function CreateShopDialog({ onCreated, trigger, defaultOpen, open
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="shop-name">Название магазина</Label>
-            <Input 
-              id="shop-name"
-              value={name} 
-              onChange={(e) => setName(e.target.value)} 
-              placeholder="Например: UNI TY"
-              disabled={loading}
-            />
-          </div>
-
-          <div className="space-y-2">
             <Label htmlFor="wb-token">WB токен</Label>
             <Input 
               id="wb-token"
               value={wbToken} 
               onChange={(e) => setWbToken(e.target.value)} 
               placeholder="Введите токен Wildberries"
-              disabled={loading}
+              disabled={loading || verifying}
               type="password"
             />
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" onClick={verify} disabled={loading || verifying || !wbToken.trim()}>
+                {verifying ? "Проверка…" : "Проверить токен"}
+              </Button>
+              {resolvedName ? (
+                <div className="text-sm text-muted-foreground">Найдено: <b className="text-foreground">{resolvedName}</b></div>
+              ) : null}
+            </div>
             <div className="text-sm text-muted-foreground">
               Токен нужен для интеграции с Wildberries API
             </div>

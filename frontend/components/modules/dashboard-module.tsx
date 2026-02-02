@@ -3,28 +3,36 @@
 import Link from "next/link"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { RefreshCw, SlidersHorizontal, Star, Wallet } from "lucide-react"
-import {
-  Line,
-  LineChart,
-  RadialBar,
-  RadialBarChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
+import { 
+  AlertTriangle, 
+  CheckCircle2, 
+  ChevronRight, 
+  Clock, 
+  HelpCircle, 
+  MessageSquare, 
+  RefreshCw, 
+  Star, 
+  TrendingUp,
+  TrendingDown
+} from "lucide-react"
 
 import { useShop } from "@/components/shop-context"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
-import { getDashboard, getSettings, syncDashboard, updateSettings, type DashboardOut, type DashboardTabKey } from "@/lib/api"
+import { 
+  getDashboardMain, 
+  getSettings, 
+  syncDashboardAll, 
+  updateSettings, 
+  type DashboardMainOut, 
+  type AttentionItem,
+  type RatingDistribution
+} from "@/lib/api"
 import { useSyncPolling } from "@/hooks/use-sync-polling"
 
 type PeriodKey = "all" | "14d" | "7d" | "30d"
@@ -36,21 +44,9 @@ function fmtPeriodLabel(p: PeriodKey) {
   return "Последние 14 дней"
 }
 
-function tabLabel(tab: DashboardTabKey) {
-  if (tab === "questions") return "вопросов"
-  if (tab === "chats") return "чатов"
-  return "отзывов"
-}
-
-function topTitle(tab: DashboardTabKey) {
-  if (tab === "chats") return "Топ покупателей по чатам"
-  return "Топ товаров по обращениям"
-}
-
-function topTabLabels(tab: DashboardTabKey) {
-  if (tab === "feedbacks") return { positive: "Положительные", negative: "Отрицательные" }
-  if (tab === "questions") return { positive: "Ожидают", negative: "Отвеченные" }
-  return { positive: "Новые", negative: "Все" }
+function formatGrowth(val: number | undefined): string {
+  if (val === undefined || val === 0) return ""
+  return val > 0 ? `+${val}` : `${val}`
 }
 
 export default function DashboardModule() {
@@ -60,19 +56,16 @@ export default function DashboardModule() {
   const [introOpen, setIntroOpen] = useState(false)
   const [introChecking, setIntroChecking] = useState(false)
 
-  const [activeTab, setActiveTab] = useState<DashboardTabKey>("feedbacks")
-  const [period, setPeriod] = useState<PeriodKey>("14d")
-  const [topTab, setTopTab] = useState<"positive" | "negative">("positive")
+  const [period, setPeriod] = useState<PeriodKey>("all")
 
-  const [data, setData] = useState<DashboardOut | null>(null)
+  const [dashboardData, setDashboardData] = useState<DashboardMainOut | null>(null)
+  const [settings, setSettings] = useState<any>(null)
+
   const [isLoading, setIsLoading] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const { isPolling, error: pollError, pollJobs } = useSyncPolling()
-
-  const canManageShop = useMemo(() => {
-    return Boolean(isSuperAdmin || shopRole === "owner" || shopRole === "manager")
-  }, [isSuperAdmin, shopRole])
 
   const selectedShopId = shopId
 
@@ -84,6 +77,7 @@ export default function DashboardModule() {
       try {
         if (mounted) setIntroChecking(true)
         const s: any = await getSettings(selectedShopId)
+        setSettings(s)
         const ob = s?.config?.onboarding
         if (ob?.done && !ob?.dashboard_intro_seen) {
           if (mounted) setIntroOpen(true)
@@ -118,33 +112,26 @@ export default function DashboardModule() {
     setIsLoading(true)
     setError(null)
     try {
-      const res = await getDashboard(activeTab, {
-        shop_id: selectedShopId,
-        period,
-      })
-      setData(res)
+      const data = await getDashboardMain({ shop_id: selectedShopId, period })
+      setDashboardData(data)
     } catch (e: any) {
       setError(e?.message || "Не удалось загрузить данные")
-      setData(null)
     } finally {
       setIsLoading(false)
     }
-  }, [activeTab, period, selectedShopId])
+  }, [period, selectedShopId])
 
   useEffect(() => {
     if (!selectedShopId) return
     loadDashboard()
-    setTopTab("positive")
-  }, [loadDashboard, selectedShopId, activeTab])
+  }, [loadDashboard, selectedShopId])
 
   const handleRefresh = useCallback(async () => {
     if (!selectedShopId) return
     setError(null)
+    setIsSyncing(true)
     try {
-      const res = await syncDashboard(activeTab, {
-        shop_id: selectedShopId,
-        period,
-      })
+      const res = await syncDashboardAll({ shop_id: selectedShopId })
       const ids = (res.job_ids || []).filter((x) => Number.isFinite(x) && x > 0)
       if (ids.length) {
         pollJobs(ids, loadDashboard)
@@ -153,40 +140,37 @@ export default function DashboardModule() {
       }
     } catch (e: any) {
       setError(e?.message || "Не удалось запустить синхронизацию")
+    } finally {
+      setIsSyncing(false)
     }
-  }, [activeTab, selectedShopId, period, pollJobs, loadDashboard])
+  }, [selectedShopId, pollJobs, loadDashboard])
 
-  const kpis = data?.kpis
-  const lineData = data?.line?.data || []
+  // Extract data
+  const feedbacks = dashboardData?.feedbacks
+  const questions = dashboardData?.questions
+  const chats = dashboardData?.chats
+  const attentionItems = dashboardData?.attentionItems || []
+  const ratingDistribution = dashboardData?.ratingDistribution
 
-  const unansweredPct = useMemo(() => {
-    const t = kpis?.total || 0
-    if (t <= 0) return 0
-    return Math.round(((kpis?.unanswered || 0) * 100) / t)
-  }, [kpis])
+  // Stats
+  const totalFeedbacks = feedbacks?.total || 0
+  const totalQuestions = questions?.total || 0
+  const totalChats = chats?.total || 0
+  const avgRating = feedbacks?.avgRating || 0
 
-  const answeredPct = useMemo(() => {
-    const t = kpis?.total || 0
-    if (t <= 0) return 0
-    return Math.round(((kpis?.answered || 0) * 100) / t)
-  }, [kpis])
+  // Automation mode
+  const automationMode = useMemo(() => {
+    const mode = dashboardData?.automationMode || settings?.config?.automation_mode || "control"
+    if (mode === "autopilot") return "Автопилот"
+    if (mode === "control") return "Контроль"
+    return "Ручной"
+  }, [dashboardData, settings])
 
-  const gaugeValue = useMemo(() => {
-    if (activeTab === "feedbacks") return Math.round(Number(kpis?.positiveShare || 0))
-    return answeredPct
-  }, [activeTab, kpis, answeredPct])
+  const syncInterval = useMemo(() => {
+    return dashboardData?.syncInterval || settings?.config?.sync_interval || "каждый час"
+  }, [dashboardData, settings])
 
-  const gaugeData = useMemo(() => [{ name: "metric", value: gaugeValue, fill: "hsl(var(--primary))" }], [gaugeValue])
-
-  const top = data?.top
-  const topLabels = topTabLabels(activeTab)
-  const topList = topTab === "positive" ? top?.positive || [] : top?.negative || []
-
-  const dashboardTitle = useMemo(() => {
-    if (activeTab === "questions") return "Главная · Вопросы"
-    if (activeTab === "chats") return "Главная · Чаты"
-    return "Главная"
-  }, [activeTab])
+  const automationStatus = dashboardData?.automationStatus || "ok"
 
   if (!selectedShopId) {
     return (
@@ -198,282 +182,429 @@ export default function DashboardModule() {
   }
 
   return (
-    <div className="space-y-6">
-      <Dialog open={introOpen} onOpenChange={setIntroOpen}>
-        <DialogContent showCloseButton={false} className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>Быстрое объяснение (30 секунд)</DialogTitle>
-            <DialogDescription>
-              Я покажу, где здесь самое важное, а потом переведу вас на «Отзывы»...
-            </DialogDescription>
-          </DialogHeader>
+    <TooltipProvider>
+      <div className="space-y-6">
+        <Dialog open={introOpen} onOpenChange={setIntroOpen}>
+          <DialogContent showCloseButton={false} className="sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Быстрое объяснение (30 секунд)</DialogTitle>
+              <DialogDescription>
+                Я покажу, где здесь самое важное, а потом переведу вас на «Отзывы»...
+              </DialogDescription>
+            </DialogHeader>
 
-          <div className="grid gap-3">
-            <div className="rounded-2xl border border-border p-4">
-              <div className="font-medium">1) Проблемы</div>
-              <div className="text-sm text-muted-foreground">Здесь будут подсказки, что требует внимания.</div>
+            <div className="grid gap-3">
+              <div className="rounded-2xl border border-border p-4">
+                <div className="font-medium">1) Проблемы</div>
+                <div className="text-sm text-muted-foreground">Здесь будут подсказки, что требует внимания.</div>
+              </div>
+              <div className="rounded-2xl border border-border p-4">
+                <div className="font-medium">2) Ожидают ответа</div>
+                <div className="text-sm text-muted-foreground">Отзывы без ответа. Внутри сразу открыт ввод ответа.</div>
+              </div>
+              <div className="rounded-2xl border border-border p-4">
+                <div className="font-medium">3) Автоматизация</div>
+                <div className="text-sm text-muted-foreground">Черновики/публикация работают по настройкам, которые вы только что задали.</div>
+              </div>
             </div>
-            <div className="rounded-2xl border border-border p-4">
-              <div className="font-medium">2) Ожидают ответа</div>
-              <div className="text-sm text-muted-foreground">Отзывы без ответа. Внутри сразу открыт ввод ответа.</div>
-            </div>
-            <div className="rounded-2xl border border-border p-4">
-              <div className="font-medium">3) Автоматизация</div>
-              <div className="text-sm text-muted-foreground">Черновики/публикация работают по настройкам, которые вы только что задали.</div>
-            </div>
-          </div>
 
-          <DialogFooter>
-            <Button onClick={finishIntro} className="rounded-2xl">
-              Перейти к отзывам
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            <DialogFooter>
+              <Button onClick={finishIntro} className="rounded-2xl">
+                Перейти к отзывам
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
-      {/* Top bar */}
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="min-w-0">
-            <div className="text-2xl font-bold text-foreground">{dashboardTitle}</div>
-            <div className="text-sm text-muted-foreground truncate">Магазин: {selectedShop?.name ?? `#${selectedShopId}`}</div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Select value={period} onValueChange={(v) => setPeriod(v as PeriodKey)}>
-              <SelectTrigger className="w-[200px] bg-card border-border">
-                <SelectValue placeholder="Период" />
-              </SelectTrigger>
-              <SelectContent className="bg-card border-border">
-                <SelectItem value="all">{fmtPeriodLabel("all")}</SelectItem>
-                <SelectItem value="7d">{fmtPeriodLabel("7d")}</SelectItem>
-                <SelectItem value="14d">{fmtPeriodLabel("14d")}</SelectItem>
-                <SelectItem value="30d">{fmtPeriodLabel("30d")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+        {/* Header */}
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-bold text-foreground">Главная</h1>
+          <Select value={period} onValueChange={(v) => setPeriod(v as PeriodKey)}>
+            <SelectTrigger className="w-[200px] bg-card border-border">
+              <SelectValue placeholder="Период" />
+            </SelectTrigger>
+            <SelectContent className="bg-card border-border">
+              <SelectItem value="all">{fmtPeriodLabel("all")}</SelectItem>
+              <SelectItem value="7d">{fmtPeriodLabel("7d")}</SelectItem>
+              <SelectItem value="14d">{fmtPeriodLabel("14d")}</SelectItem>
+              <SelectItem value="30d">{fmtPeriodLabel("30d")}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
-        <Button onClick={handleRefresh} disabled={isPolling || isLoading} className="bg-primary hover:bg-primary/90">
-          <RefreshCw className={`h-4 w-4 mr-2 ${isPolling ? "animate-spin" : ""}`} />
-          {isPolling ? "Синхронизация…" : "Обновить данные"}
-        </Button>
-      </div>
+        {(error || pollError) && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {pollError || error}
+          </div>
+        )}
 
-      {(error || pollError) && (
-        <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {pollError || error}
-        </div>
-      )}
+        {/* Attention Section */}
+        <Card className="border-border">
+          <CardContent className="pt-6">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="text-lg font-semibold text-foreground flex items-center gap-2">
+                <span className="text-primary">⚡</span>
+                Требует вашего внимания
+              </div>
+            </div>
 
-      {/* Main tabs */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as DashboardTabKey)} className="space-y-4">
-        <TabsList className="w-full bg-muted">
-          <TabsTrigger value="feedbacks" className="flex-1">
-            Отзывы
-          </TabsTrigger>
-          <TabsTrigger value="questions" className="flex-1">
-            Вопросы
-          </TabsTrigger>
-          <TabsTrigger value="chats" className="flex-1">
-            Чаты
-          </TabsTrigger>
-        </TabsList>
+            <div className="space-y-3">
+              {attentionItems.map((item, idx) => (
+                <AttentionItemCard key={idx} item={item} />
+              ))}
 
-        {(["feedbacks", "questions", "chats"] as DashboardTabKey[]).map((tab) => (
-          <TabsContent key={tab} value={tab} className="space-y-6">
-            {activeTab !== tab ? null : (
-              <>
-                {/* KPI + Gauge + Balance */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <Card className="lg:col-span-1">
-                    <CardHeader>
-                      <CardTitle className="text-base">Сводка</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="rounded-xl border border-border bg-card p-4">
-                          <div className="text-xs text-muted-foreground">Всего поступило</div>
-                          <div className="text-3xl font-bold text-primary mt-1">{kpis?.total ?? 0}</div>
-                        </div>
-                        <div className="rounded-xl border border-border bg-card p-4">
-                          <div className="text-xs text-muted-foreground">Ожидают обработки</div>
-                          <div className="text-3xl font-bold text-foreground mt-1">{kpis?.pending ?? 0}</div>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="rounded-xl border border-border bg-card p-4">
-                          <div className="text-xs text-muted-foreground">Неотвеченные {tabLabel(activeTab)}</div>
-                          <div className="flex items-end justify-between mt-1">
-                            <div className="text-3xl font-bold text-foreground">{kpis?.unanswered ?? 0}</div>
-                            <div className="text-xs text-muted-foreground">{unansweredPct}%</div>
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-border bg-card p-4">
-                          <div className="text-xs text-muted-foreground">Отвеченные {tabLabel(activeTab)}</div>
-                          <div className="flex items-end justify-between mt-1">
-                            <div className="text-3xl font-bold text-foreground">{kpis?.answered ?? 0}</div>
-                            {activeTab !== "feedbacks" && <div className="text-xs text-muted-foreground">{answeredPct}%</div>}
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="lg:col-span-1">
-                    <CardHeader>
-                      <CardTitle className="text-base">{activeTab === "feedbacks" ? "Средний рейтинг отзывов" : "Доля отвеченных"}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {activeTab === "feedbacks" ? (
-                        <div className="flex items-center justify-end gap-2 mb-2">
-                          <Star className="h-4 w-4 text-primary" />
-                          <div className="text-2xl font-bold text-foreground">{Number(kpis?.avgRating || 0).toFixed(1)}</div>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-end gap-2 mb-2">
-                          <div className="text-2xl font-bold text-foreground">{answeredPct}%</div>
-                        </div>
-                      )}
-
-                      <div className="h-[170px]">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <RadialBarChart innerRadius="70%" outerRadius="100%" data={gaugeData} startAngle={180} endAngle={0}>
-                            <RadialBar dataKey="value" cornerRadius={999} />
-                            <Tooltip />
-                          </RadialBarChart>
-                        </ResponsiveContainer>
-                      </div>
-
-                      <div className="text-center -mt-10">
-                        <div className="text-3xl font-bold text-primary">{gaugeValue}%</div>
-                        <div className="text-xs text-muted-foreground">{activeTab === "feedbacks" ? "Положительных отзывов" : "Отвечено"}</div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <div className="lg:col-span-1 space-y-6">
-                    <Card className="border-border overflow-hidden">
-                      <div className="p-6 rounded-xl bg-gradient-to-br from-primary/20 via-primary/5 to-background">
-                        <div className="text-xs text-muted-foreground">Баланс магазина</div>
-                        {canManageShop ? (
-                          <>
-                            <div className="mt-2 flex items-end justify-between gap-2">
-                              <div className="text-3xl font-bold text-foreground">{billing?.credits_balance ?? 0}</div>
-                              <div className="text-xs text-muted-foreground pb-1">кредитов</div>
-                            </div>
-                            <div className="text-xs text-muted-foreground mt-1">Потрачено: {billing?.credits_spent ?? 0}</div>
-                            <div className="mt-4">
-                              <Button asChild size="sm" className="bg-primary hover:bg-primary/90">
-                                <Link href="/app/billing">
-                                  <Wallet className="h-4 w-4 mr-2" />
-                                  Открыть баланс
-                                </Link>
-                              </Button>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="mt-2 text-sm text-muted-foreground">Доступ к балансу ограничен вашей ролью.</div>
-                        )}
-                      </div>
-                    </Card>
-
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="text-base">Быстрые действия</CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <div className="text-sm text-muted-foreground">
-                          Настройте лимиты автогенерации и автопубликации, чтобы контролировать расход кредитов и объём ответов.
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <Button asChild variant="outline" className="justify-start">
-                                <Link href="/app/settings">
-                              <SlidersHorizontal className="h-4 w-4 mr-2" />
-                              Настройки автоответов
-                            </Link>
-                          </Button>
-                          <Button asChild variant="outline" className="justify-start">
-                            <Link href="/app/drafts">Открыть черновики</Link>
-                          </Button>
-                          <Button asChild variant="outline" className="justify-start">
-                            <Link href="/app/feedbacks">Перейти к отзывам</Link>
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
+              {/* No attention items */}
+              {attentionItems.length === 0 && (
+                <div className="flex items-center gap-3 p-4 rounded-xl bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-900">
+                  <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/50 flex items-center justify-center">
+                    <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div>
+                    <div className="font-medium text-foreground">Всё под контролем!</div>
+                    <div className="text-sm text-muted-foreground">Нет срочных задач</div>
                   </div>
                 </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
-                {/* Line chart + Top */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <Card className="lg:col-span-2">
-                    <CardHeader className="flex-row items-center justify-between">
-                      <CardTitle className="text-base">Динамика изменений <span className="text-primary">{tabLabel(activeTab)}</span></CardTitle>
-                      <div className="text-xs text-muted-foreground">{fmtPeriodLabel(period)}</div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-[320px]">
-                        {isLoading ? (
-                          <div className="h-full flex items-center justify-center text-sm text-muted-foreground">Загрузка…</div>
-                        ) : (
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={lineData} margin={{ left: 4, right: 12, top: 10, bottom: 0 }}>
-                              <XAxis dataKey="d" tickMargin={8} />
-                              <YAxis tickMargin={8} />
-                              <Tooltip />
-                              <Line type="monotone" dataKey="v" strokeWidth={2} dot />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        )}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-3">{data?.line?.periodText || ""}</div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="lg:col-span-1">
-                    <CardHeader>
-                      <CardTitle className="text-base">{topTitle(activeTab)}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <Tabs value={topTab} onValueChange={(v) => setTopTab(v as any)}>
-                        <TabsList className="w-full">
-                          <TabsTrigger value="positive" className="flex-1">{topLabels.positive}</TabsTrigger>
-                          <TabsTrigger value="negative" className="flex-1">{topLabels.negative}</TabsTrigger>
-                        </TabsList>
-
-                        <div className="mt-4 space-y-3">
-                          {isLoading ? (
-                            <div className="text-sm text-muted-foreground">Загрузка…</div>
-                          ) : topList.length ? (
-                            topList.map((it, idx) => (
-                              <div key={idx} className="rounded-xl bg-muted/40 border border-border p-3">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <div className="text-sm font-medium text-foreground leading-snug line-clamp-2">{it.title}</div>
-                                    {!!it.brand && <div className="text-xs text-muted-foreground mt-1">{it.brand}</div>}
-                                  </div>
-                                  <div className="text-xl font-bold text-primary">{it.count}</div>
-                                </div>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="text-sm text-muted-foreground">Нет данных за выбранный период</div>
-                          )}
-                        </div>
-                      </Tabs>
-
-                      <Separator className="my-4" />
-                      <div className="text-xs text-muted-foreground">Период: {data?.meta?.date_from?.slice(0, 10)} — {data?.meta?.date_to?.slice(0, 10)}</div>
-                    </CardContent>
-                  </Card>
+        {/* Stats Grid with Tooltips */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {/* Feedbacks */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Card className="border-border cursor-pointer hover:border-primary/50 transition-colors">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div className="text-4xl font-bold text-foreground">
+                      {isLoading ? "…" : totalFeedbacks}
+                    </div>
+                    {feedbacks?.periodGrowth !== undefined && feedbacks.periodGrowth !== 0 && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${feedbacks.periodGrowth > 0 ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400'}`}>
+                        {formatGrowth(feedbacks.periodGrowth)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">Отзывов</div>
+                </CardContent>
+              </Card>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="bg-popover border border-border p-3 w-64">
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Всего отзывов:</span>
+                  <span className="font-medium">{totalFeedbacks}</span>
                 </div>
-              </>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Обработано системой:</span>
+                  <span className="font-medium text-green-600">{feedbacks?.processedBySystem || feedbacks?.answered || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Прирост за период:</span>
+                  <span className="font-medium text-green-600">{formatGrowth(feedbacks?.periodGrowth) || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Ожидают обработки:</span>
+                  <span className="font-medium text-orange-600">{feedbacks?.awaitingProcessing || feedbacks?.unanswered || 0}</span>
+                </div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+
+          {/* Questions */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Card className="border-border cursor-pointer hover:border-primary/50 transition-colors">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div className="text-4xl font-bold text-foreground">
+                      {isLoading ? "…" : totalQuestions}
+                    </div>
+                    {questions?.periodGrowth !== undefined && questions.periodGrowth !== 0 && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${questions.periodGrowth > 0 ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400'}`}>
+                        {formatGrowth(questions.periodGrowth)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">Вопросов</div>
+                </CardContent>
+              </Card>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="bg-popover border border-border p-3 w-64">
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Всего вопросов:</span>
+                  <span className="font-medium">{totalQuestions}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Обработано системой:</span>
+                  <span className="font-medium text-green-600">{questions?.processedBySystem || questions?.answered || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Прирост за период:</span>
+                  <span className="font-medium text-green-600">{formatGrowth(questions?.periodGrowth) || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Ожидают ответа:</span>
+                  <span className="font-medium text-orange-600">{questions?.unanswered || 0}</span>
+                </div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+
+          {/* Chats */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Card className="border-border cursor-pointer hover:border-primary/50 transition-colors">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div className="text-4xl font-bold text-foreground">
+                      {isLoading ? "…" : totalChats}
+                    </div>
+                    {chats?.periodGrowth !== undefined && chats.periodGrowth !== 0 && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${chats.periodGrowth > 0 ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-400'}`}>
+                        {formatGrowth(chats.periodGrowth)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">Чатов</div>
+                </CardContent>
+              </Card>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="bg-popover border border-border p-3 w-64">
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Всего чатов:</span>
+                  <span className="font-medium">{totalChats}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Закрыто:</span>
+                  <span className="font-medium text-green-600">{chats?.closed || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Прирост за период:</span>
+                  <span className="font-medium text-green-600">{formatGrowth(chats?.periodGrowth) || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Активных:</span>
+                  <span className="font-medium text-blue-600">{chats?.active || 0}</span>
+                </div>
+              </div>
+            </TooltipContent>
+          </Tooltip>
+
+          {/* Rating with distribution */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Card className="border-border cursor-pointer hover:border-primary/50 transition-colors">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="text-4xl font-bold text-foreground">
+                      {isLoading ? "…" : Number(avgRating).toFixed(1)}
+                    </div>
+                    <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" />
+                    <span className="text-xs text-muted-foreground">
+                      {ratingDistribution?.totalRated || 0}
+                    </span>
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">Рейтинг</div>
+                </CardContent>
+              </Card>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="bg-popover border border-border p-4 w-80">
+              {ratingDistribution && (
+                <RatingDistributionBlock distribution={ratingDistribution} />
+              )}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+
+        {/* Automation Status */}
+        <Card className="border-border">
+          <CardContent className="py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                  automationStatus === "ok" 
+                    ? "bg-green-100 dark:bg-green-900/50" 
+                    : automationStatus === "stale"
+                    ? "bg-yellow-100 dark:bg-yellow-900/50"
+                    : "bg-red-100 dark:bg-red-900/50"
+                }`}>
+                  <CheckCircle2 className={`w-5 h-5 ${
+                    automationStatus === "ok"
+                      ? "text-green-600 dark:text-green-400"
+                      : automationStatus === "stale"
+                      ? "text-yellow-600 dark:text-yellow-400"
+                      : "text-red-600 dark:text-red-400"
+                  }`} />
+                </div>
+                <div>
+                  <div className="font-medium text-foreground">
+                    {automationStatus === "ok" 
+                      ? "Автоматизация работает исправно" 
+                      : automationStatus === "stale"
+                      ? "Синхронизация устарела"
+                      : "Проверьте настройки"}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    Режим: <span className="font-medium text-foreground">{automationMode}</span> — AI создаёт черновики, вы проверяете перед публикацией · Синхр. {syncInterval}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={handleRefresh}
+                  disabled={isSyncing || isPolling}
+                  className="gap-2"
+                >
+                  <RefreshCw className={`w-4 h-4 ${(isSyncing || isPolling) ? 'animate-spin' : ''}`} />
+                  {isSyncing || isPolling ? 'Синхр...' : 'Обновить'}
+                </Button>
+                <Button asChild variant="ghost" className="text-muted-foreground hover:text-foreground">
+                  <Link href="/app/settings">Настройки</Link>
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </TooltipProvider>
+  )
+}
+
+function AttentionItemCard({ item }: { item: AttentionItem }) {
+  const getStyles = () => {
+    switch (item.severity) {
+      case "high":
+        return {
+          bg: "bg-red-50 dark:bg-red-950/30",
+          border: "border-red-200 dark:border-red-900",
+          iconBg: "bg-red-100 dark:bg-red-900/50",
+          iconColor: "text-red-600 dark:text-red-400",
+          buttonClass: "bg-red-500 hover:bg-red-600 text-white"
+        }
+      case "medium":
+        return {
+          bg: "bg-yellow-50 dark:bg-yellow-950/30",
+          border: "border-yellow-200 dark:border-yellow-900",
+          iconBg: "bg-yellow-100 dark:bg-yellow-900/50",
+          iconColor: "text-yellow-600 dark:text-yellow-400",
+          buttonClass: ""
+        }
+      default:
+        return {
+          bg: "bg-card",
+          border: "border-border",
+          iconBg: "bg-muted",
+          iconColor: "text-muted-foreground",
+          buttonClass: ""
+        }
+    }
+  }
+
+  const getIcon = () => {
+    switch (item.type) {
+      case "negative_reviews":
+        return <AlertTriangle className={`w-5 h-5 ${styles.iconColor}`} />
+      case "unanswered_reviews":
+        return <Clock className={`w-5 h-5 ${styles.iconColor}`} />
+      case "pending_drafts":
+        return <Clock className={`w-5 h-5 ${styles.iconColor}`} />
+      case "unanswered_questions":
+        return <HelpCircle className={`w-5 h-5 ${styles.iconColor}`} />
+      case "active_chats":
+        return <MessageSquare className={`w-5 h-5 ${styles.iconColor}`} />
+      default:
+        return <AlertTriangle className={`w-5 h-5 ${styles.iconColor}`} />
+    }
+  }
+
+  const getButtonLabel = () => {
+    switch (item.type) {
+      case "negative_reviews":
+        return "Ответить"
+      case "unanswered_reviews":
+        return "Ответить"
+      case "pending_drafts":
+        return "Проверить"
+      default:
+        return "Открыть"
+    }
+  }
+
+  const styles = getStyles()
+
+  return (
+    <div className={`flex items-center justify-between p-4 rounded-xl ${styles.bg} border ${styles.border}`}>
+      <div className="flex items-center gap-3">
+        <div className={`w-10 h-10 rounded-full ${styles.iconBg} flex items-center justify-center`}>
+          {getIcon()}
+        </div>
+        <div>
+          <div className="font-medium text-foreground">{item.title}</div>
+          <div className="text-sm text-muted-foreground">{item.subtitle}</div>
+        </div>
+      </div>
+      <Button 
+        asChild 
+        variant={item.severity === "high" ? "default" : item.severity === "medium" ? "outline" : "ghost"}
+        className={styles.buttonClass}
+      >
+        <Link href={item.link}>
+          {getButtonLabel()}
+          <ChevronRight className="w-4 h-4 ml-1" />
+        </Link>
+      </Button>
+    </div>
+  )
+}
+
+function RatingDistributionBlock({ distribution }: { distribution: RatingDistribution }) {
+  const total = distribution.totalRated || 1
+  const maxCount = Math.max(distribution.stars5, distribution.stars4, distribution.stars3, distribution.stars2, distribution.stars1, 1)
+
+  const ratings = [
+    { stars: 5, count: distribution.stars5, growth: distribution.stars5Growth },
+    { stars: 4, count: distribution.stars4, growth: distribution.stars4Growth },
+    { stars: 3, count: distribution.stars3, growth: distribution.stars3Growth },
+    { stars: 2, count: distribution.stars2, growth: distribution.stars2Growth },
+    { stars: 1, count: distribution.stars1, growth: distribution.stars1Growth },
+  ]
+
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-between items-center">
+        <span className="font-medium text-foreground">Новых оценок</span>
+        <span className="font-bold text-lg">{total.toLocaleString()}</span>
+      </div>
+      <div className="space-y-2">
+        {ratings.map((r) => (
+          <div key={r.stars} className="flex items-center gap-2">
+            <div className="flex items-center gap-1 w-10">
+              <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+              <span className="text-sm font-medium">{r.stars}</span>
+            </div>
+            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+              <div 
+                className={`h-full transition-all ${
+                  r.stars >= 4 ? 'bg-yellow-400' : r.stars === 3 ? 'bg-purple-400' : 'bg-orange-400'
+                }`}
+                style={{ width: `${(r.count / maxCount) * 100}%` }}
+              />
+            </div>
+            <span className="text-sm w-16 text-right tabular-nums">{r.count.toLocaleString()}</span>
+            {r.growth !== 0 && (
+              <span className={`text-xs w-12 text-right ${r.growth > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                {formatGrowth(r.growth)}
+              </span>
             )}
-          </TabsContent>
+          </div>
         ))}
-      </Tabs>
+      </div>
     </div>
   )
 }

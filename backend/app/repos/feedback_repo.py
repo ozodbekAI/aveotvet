@@ -64,6 +64,8 @@ class FeedbackRepo:
         date_from_unix: int | None = None,
         date_to_unix: int | None = None,
         rating: int | None = None,
+        rating_min: int | None = None,
+        rating_max: int | None = None,
         has_text: bool | None = None,
         has_media: bool | None = None,
     ) -> tuple[list[Feedback], int]:
@@ -82,9 +84,14 @@ class FeedbackRepo:
             dt_to = datetime.fromtimestamp(int(date_to_unix), tz=timezone.utc)
             cond.append(Feedback.created_date <= dt_to)
 
-        # Rating
+        # Rating filter - support both exact and range
         if rating is not None:
             cond.append(Feedback.product_valuation == int(rating))
+        elif rating_min is not None or rating_max is not None:
+            if rating_min is not None:
+                cond.append(Feedback.product_valuation >= int(rating_min))
+            if rating_max is not None:
+                cond.append(Feedback.product_valuation <= int(rating_max))
 
         # Text presence
         if has_text is True:
@@ -178,3 +185,76 @@ class FeedbackRepo:
         )
         rows = await self.session.execute(q)
         return list(rows.scalars().all())
+
+    async def get_product_analytics(self, shop_id: int, limit: int = 5) -> dict:
+        """
+        Return analytics grouped by product:
+        - top_products: products with most positive reviews (4-5 stars)
+        - problem_products: products with most negative reviews (1-2 stars)
+        """
+        from datetime import timedelta
+
+        now = datetime.now(timezone.utc)
+        week_ago = now - timedelta(days=7)
+
+        # Get product name from JSONB
+        product_name_expr = Feedback.product_details["productName"].astext
+
+        # Top products (rating 4-5)
+        top_q = (
+            select(
+                product_name_expr.label("product_name"),
+                func.count().label("total_count"),
+                func.sum(
+                    case((Feedback.created_date >= week_ago, 1), else_=0)
+                ).label("recent_count"),
+            )
+            .where(
+                Feedback.shop_id == shop_id,
+                Feedback.product_valuation.in_([4, 5]),
+                product_name_expr.isnot(None),
+            )
+            .group_by(product_name_expr)
+            .order_by(func.count().desc())
+            .limit(limit)
+        )
+        top_rows = (await self.session.execute(top_q)).mappings().all()
+
+        # Problem products (rating 1-2)
+        problem_q = (
+            select(
+                product_name_expr.label("product_name"),
+                func.count().label("total_count"),
+                func.sum(
+                    case((Feedback.created_date >= week_ago, 1), else_=0)
+                ).label("recent_count"),
+            )
+            .where(
+                Feedback.shop_id == shop_id,
+                Feedback.product_valuation.in_([1, 2]),
+                product_name_expr.isnot(None),
+            )
+            .group_by(product_name_expr)
+            .order_by(func.count().desc())
+            .limit(limit)
+        )
+        problem_rows = (await self.session.execute(problem_q)).mappings().all()
+
+        return {
+            "top_products": [
+                {
+                    "name": row["product_name"],
+                    "count": row["total_count"],
+                    "recent": row["recent_count"] or 0,
+                }
+                for row in top_rows
+            ],
+            "problem_products": [
+                {
+                    "name": row["product_name"],
+                    "count": row["total_count"],
+                    "recent": row["recent_count"] or 0,
+                }
+                for row in problem_rows
+            ],
+        }

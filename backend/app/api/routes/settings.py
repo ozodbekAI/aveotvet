@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone
 import logging
 
 from app.api.deps import get_db, get_current_user
 from app.api.access import require_shop_access
 from app.models.enums import ShopMemberRole
+from app.models.feedback import Feedback
 from app.repos.shop_repo import ShopRepo
 from app.repos.signature_repo import SignatureRepo
-from app.schemas.settings import SettingsOut, SettingsUpdate
+from app.services.openai_client import OpenAIService
+from app.services.drafting import generate_draft_text
+from app.services.prompt_store import get_global_bundle
+from app.schemas.settings import SettingsOut, SettingsUpdate, ReviewPreviewsOut
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -217,6 +222,88 @@ async def get_settings(shop_id: int, request: Request, db: AsyncSession = Depend
         raise HTTPException(status_code=404, detail="Settings not found")
     return s
 
+
+
+
+@router.get("/{shop_id}/preview/reviews", response_model=ReviewPreviewsOut)
+async def preview_review_replies(shop_id: int, request: Request, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    # Manager+ can preview; generation is not charged.
+    (await require_shop_access(db, user, shop_id, request=request, min_role=ShopMemberRole.manager.value)).shop
+
+    s = await ShopRepo(db).get_settings(shop_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Settings not found")
+
+    # If generation is disabled at config level, fail fast.
+    cfg = getattr(s, "config", None) or {}
+    if isinstance(cfg, dict) and cfg.get("advanced", {}).get("generation_disabled") is True:
+        raise HTTPException(status_code=403, detail="Generation is disabled in settings")
+
+    bundle = await get_global_bundle(db)
+
+    try:
+        openai = OpenAIService()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    now = datetime.now(timezone.utc)
+
+    samples = [
+        (
+            "negative",
+            1,
+            "Заказ пришёл с браком. Упаковка помята, товар не работает как надо. Очень разочарован.",
+            None,
+            "Брак/не работает, упаковка помята",
+        ),
+        (
+            "neutral",
+            3,
+            "Товар нормальный, но ожидал чуть лучше. Доставка была немного дольше обещанного.",
+            "В целом соответствует описанию",
+            "Доставка дольше, чем ожидал",
+        ),
+        (
+            "positive",
+            5,
+            "Отличное качество! Всё подошло идеально, доставка быстрая. Спасибо!",
+            "Качество, скорость доставки",
+            None,
+        ),
+    ]
+
+    items = []
+    for kind, rating, text, pros, cons in samples:
+        fb = Feedback(
+            id=0,
+            shop_id=shop_id,
+            wb_id=f"preview_{kind}",
+            created_date=now,
+            product_valuation=int(rating),
+            text=text,
+            pros=pros,
+            cons=cons,
+            user_name="Покупатель",
+            product_details={
+                "brandName": "DemoBrand",
+                "productName": "Демонстрационный товар",
+                "subjectName": "Категория",
+            },
+        )
+        reply_text, model, response_id, prompt_tokens, completion_tokens = await generate_draft_text(openai, fb, s, bundle=bundle)
+        items.append(
+            {
+                "kind": kind,
+                "rating": int(rating),
+                "review_text": text,
+                "pros": pros,
+                "cons": cons,
+                "reply_text": reply_text,
+                "model": model,
+            }
+        )
+
+    return {"items": items}
 
 @router.put("/{shop_id}", response_model=SettingsOut)
 async def update_settings(

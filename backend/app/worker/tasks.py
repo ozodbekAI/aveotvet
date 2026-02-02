@@ -143,7 +143,7 @@ async def _job_sync_shop(session: AsyncSession, payload: dict) -> None:
             max_total=int(max_total) if max_total is not None else None,
         )
 
-    if settings_obj.auto_draft and (is_answered is None or is_answered is False) and (settings_obj.reply_mode in ("semi", "auto")):
+    if settings_obj.automation_enabled and settings_obj.auto_draft and (is_answered is None or is_answered is False) and (settings_obj.reply_mode in ("semi", "auto")):
         # Auto-generate drafts for newest unanswered feedbacks, but respect
         # (1) per-sync limit and (2) owner's credit balance.
         per_sync_limit = int(getattr(settings_obj, "auto_draft_limit_per_sync", 0) or 0)
@@ -159,10 +159,21 @@ async def _job_sync_shop(session: AsyncSession, payload: dict) -> None:
 
         if cap > 0:
             repo = FeedbackRepo(session)
-            feedbacks = await repo.list_unanswered_without_drafts(shop_id=shop_id, limit=cap)
+            # We may skip some feedbacks based on rating mode; fetch a bit more to fill the cap.
+            feedbacks = await repo.list_unanswered_without_drafts(shop_id=shop_id, limit=max(cap * 3, cap))
             job_repo = JobRepo(session)
+            queued = 0
             for fb in feedbacks:
-                await job_repo.enqueue(JobType.generate_draft.value, {"shop_id": shop_id, "feedback_id": fb.id})
+                if queued >= cap:
+                    break
+                eff_mode = effective_mode_for_rating(settings_obj, fb.product_valuation or 0)
+                if eff_mode == "manual":
+                    continue
+                await job_repo.enqueue(
+                    JobType.generate_draft.value,
+                    {"shop_id": shop_id, "feedback_id": fb.id, "source": "auto"},
+                )
+                queued += 1
 
     await session.flush()
 
@@ -202,6 +213,10 @@ async def _job_sync_questions(session: AsyncSession, payload: dict) -> None:
             date_to_unix=date_to_unix,
         )
 
+    # Update last questions sync timestamp
+    settings_obj.last_questions_sync_at = datetime.now(timezone.utc)
+    await session.flush()
+
 
 async def _job_sync_product_cards(session: AsyncSession, payload: dict) -> None:
     """Sync product cards (Content API) to be able to return product photos with feedbacks."""
@@ -224,6 +239,7 @@ async def _job_sync_product_cards(session: AsyncSession, payload: dict) -> None:
 async def _job_generate_draft(session: AsyncSession, payload: dict) -> None:
     shop_id = int(payload["shop_id"])
     feedback_id = int(payload["feedback_id"])
+    source = (payload.get("source") or "auto").lower()
 
     shop = await session.get(Shop, shop_id)
     if not shop:
@@ -232,8 +248,18 @@ async def _job_generate_draft(session: AsyncSession, payload: dict) -> None:
     if not settings_obj:
         return
 
+    # Start/Stop toggle: if this job came from the scheduler, respect automation_enabled.
+    if source == "auto" and not bool(getattr(settings_obj, "automation_enabled", False)):
+        return
+
     feedback = await session.get(Feedback, feedback_id)
     if not feedback or feedback.answer_text:
+        return
+
+    # If rating is configured as 'manual', auto jobs should not generate.
+    rating = feedback.product_valuation or 0
+    eff_mode = effective_mode_for_rating(settings_obj, rating)
+    if source == "auto" and eff_mode == "manual":
         return
 
     # Billing: charge credits before spending OpenAI tokens.
@@ -278,17 +304,15 @@ async def _job_generate_draft(session: AsyncSession, payload: dict) -> None:
         completion_tokens=completion_tokens,
         response_id=response_id,
     )
-    # rating-based workflow
-    rating = feedback.product_valuation or 0
-    eff_mode = effective_mode_for_rating(settings_obj, rating)
+    # rating-based workflow (already computed above)
 
     # UI parity: auto-publish is decided by per-rating mode (auto) plus blacklist guard.
     # Older versions also used `auto_publish` and `min_rating_to_autopublish`, but those
     # settings do not exist in the UI shown in screenshots and would block per-rating auto.
-    if (not bl_hit) and eff_mode == "auto":
+    if source == "auto" and bool(getattr(settings_obj, "automation_enabled", False)) and (not bl_hit) and eff_mode == "auto":
         await JobRepo(session).enqueue(
             JobType.publish_answer.value,
-            {"shop_id": shop_id, "feedback_id": feedback.id, "draft_id": draft.id},
+            {"shop_id": shop_id, "feedback_id": feedback.id, "draft_id": draft.id, "source": "auto"},
         )
 
 
@@ -296,9 +320,19 @@ async def _job_publish_answer(session: AsyncSession, payload: dict) -> None:
     shop_id = int(payload["shop_id"])
     feedback_id = int(payload["feedback_id"])
     draft_id = payload.get("draft_id")
+    source = (payload.get("source") or "auto").lower()
 
     shop = await session.get(Shop, shop_id)
     if not shop:
+        return
+
+    settings_obj = await ShopRepo(session).get_settings(shop_id)
+    if not settings_obj:
+        return
+    await _ensure_ops_allowed(session, settings_obj, "publish")
+
+    if source == "auto" and not bool(getattr(settings_obj, "automation_enabled", False)):
+        # Auto-publish is disabled.
         return
     feedback = await session.get(Feedback, feedback_id)
     if not feedback or feedback.answer_text:

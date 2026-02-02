@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation"
 
 import Landing from "@/components/marketing/landing"
-import { getMeServer, getTokenFromCookie, isAdminRole } from "@/lib/server-backend"
+import { getMeServer, getTokenFromCookie, isAdminRole, listShopsServer } from "@/lib/server-backend"
 
 export default async function Home() {
   // If the user is already logged-in, keep the old behavior (send them to the right dashboard).
@@ -11,6 +11,10 @@ export default async function Home() {
     if (me) {
       if (isAdminRole(me.role)) {
         redirect("/admin/dashboard")
+      }
+      const shops = await listShopsServer(token)
+      if (!shops || shops.length === 0) {
+        redirect("/app/onboarding")
       }
       redirect("/app/dashboard")
     }

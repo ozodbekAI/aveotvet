@@ -166,7 +166,7 @@ export default function StartPage() {
               <div className="text-sm font-semibold">Что будет дальше</div>
               <ol className="mt-3 space-y-3 text-sm text-muted-foreground">
                 <li>
-                  <span className="font-medium text-foreground">Шаг 2:</span> Добавите магазин (название + WB Token).
+                  <span className="font-medium text-foreground">Шаг 2:</span> Вставите WB Token — мы сами подтянем название магазина.
                 </li>
                 <li>
                   <span className="font-medium text-foreground">Шаг 3:</span> Выберете правила (авто/ручной режим, тон,

@@ -59,7 +59,8 @@ class ShopSettings(Base):
     last_feedback_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_questions_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_chat_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    chat_next_ms: Mapped[int | None] = mapped_column(Integer, nullable=True) 
+    last_full_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    chat_next_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True) 
 
     last_cards_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cards_cursor_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

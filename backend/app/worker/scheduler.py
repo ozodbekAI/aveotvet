@@ -22,7 +22,10 @@ async def scheduler_tick(session: AsyncSession) -> None:
     This function is designed to be called frequently (e.g. every 10-30 seconds) from the worker loop.
     It schedules:
       * feedbacks sync every AUTO_SYNC_INTERVAL_MIN (unanswered only)
+      * questions sync every QUESTIONS_SYNC_INTERVAL_MIN
+      * chats sync every CHATS_SYNC_INTERVAL_MIN
       * product cards sync every CARDS_SYNC_INTERVAL_MIN (paged)
+      * full sync every FULL_SYNC_INTERVAL_MIN (all data)
 
     Duplicate jobs are avoided via JobRepo.exists_pending_for_shop.
     """
@@ -45,6 +48,9 @@ async def scheduler_tick(session: AsyncSession) -> None:
 
     feedback_interval = timedelta(minutes=int(settings.AUTO_SYNC_INTERVAL_MIN))
     cards_interval = timedelta(minutes=int(settings.CARDS_SYNC_INTERVAL_MIN))
+    questions_interval = timedelta(minutes=int(getattr(settings, "QUESTIONS_SYNC_INTERVAL_MIN", 120)))
+    chats_interval = timedelta(minutes=int(getattr(settings, "CHATS_SYNC_INTERVAL_MIN", 60)))
+    full_sync_interval = timedelta(minutes=int(getattr(settings, "FULL_SYNC_INTERVAL_MIN", 120)))
 
     for shop, st in rows:
         # --- Feedbacks autosync (unanswered only) ---
@@ -80,6 +86,55 @@ async def scheduler_tick(session: AsyncSession) -> None:
                     shop.id,
                     date_from_unix,
                 )
+
+        # --- Questions autosync ---
+        if settings.AUTO_SYNC_ENABLED:
+            last_questions_sync = getattr(st, "last_questions_sync_at", None)
+            due_questions = last_questions_sync is None or (now - last_questions_sync) >= questions_interval
+            if due_questions and not await job_repo.exists_pending_for_shop(JobType.sync_questions.value, shop.id):
+                for is_answered in (False, True):
+                    await job_repo.enqueue(
+                        JobType.sync_questions.value,
+                        {
+                            "shop_id": shop.id,
+                            "is_answered": is_answered,
+                            "take": int(settings.AUTO_SYNC_TAKE),
+                            "skip": 0,
+                            "order": "dateDesc",
+                        },
+                    )
+                log.info("[scheduler] enqueued %s shop_id=%s", JobType.sync_questions.value, shop.id)
+
+        # --- Chats autosync ---
+        if settings.AUTO_SYNC_ENABLED and bool(getattr(st, "chat_enabled", False)):
+            last_chat_sync = getattr(st, "last_chat_sync_at", None)
+            due_chats = last_chat_sync is None or (now - last_chat_sync) >= chats_interval
+            if due_chats and not await job_repo.exists_pending_for_shop(JobType.sync_chats.value, shop.id):
+                await job_repo.enqueue(JobType.sync_chats.value, {"shop_id": shop.id})
+                await job_repo.enqueue(JobType.sync_chat_events.value, {"shop_id": shop.id})
+                log.info("[scheduler] enqueued %s shop_id=%s", JobType.sync_chats.value, shop.id)
+
+        # --- Full sync every 2 hours (all feedbacks both answered and unanswered) ---
+        last_full_sync = getattr(st, "last_full_sync_at", None)
+        due_full = last_full_sync is None or (now - last_full_sync) >= full_sync_interval
+        if due_full and settings.AUTO_SYNC_ENABLED:
+            # Schedule full sync for answered feedbacks too
+            if not await job_repo.exists_pending_for_shop(JobType.sync_shop.value, shop.id):
+                await job_repo.enqueue(
+                    JobType.sync_shop.value,
+                    {
+                        "shop_id": shop.id,
+                        "is_answered": True,
+                        "take": 5000,
+                        "skip": 0,
+                        "order": "dateDesc",
+                        "max_total": 10000,
+                    },
+                )
+                log.info("[scheduler] enqueued full sync (answered) shop_id=%s", shop.id)
+
+            # Update last full sync timestamp
+            st.last_full_sync_at = now
 
         # --- Product cards sync (Content API) ---
         if settings.CARDS_SYNC_ENABLED:

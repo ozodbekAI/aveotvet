@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     AUTO_SYNC_ENABLED: bool = True
     AUTO_SYNC_INTERVAL_MIN: int = 60
 
+    # Questions/chats sync intervals
+    QUESTIONS_SYNC_INTERVAL_MIN: int = 120  # 2h
+    CHATS_SYNC_INTERVAL_MIN: int = 60       # 1h
+    FULL_SYNC_INTERVAL_MIN: int = 120       # 2h - full sync all data
+
     # Autosync safety caps
     AUTO_SYNC_TAKE: int = 500
     AUTO_SYNC_MAX_TOTAL: int = 2000

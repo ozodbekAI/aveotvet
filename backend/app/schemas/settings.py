@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 from app.schemas.config_schemas import ConfigUpdate, ConfigResponse
 
@@ -113,3 +115,16 @@ class SettingsUpdate(BaseModel):
     questions_auto_publish: bool | None = None
     
     config: ConfigUpdate | None = None
+
+class ReviewPreviewItem(BaseModel):
+    kind: Literal["negative", "neutral", "positive"]
+    rating: int = Field(ge=1, le=5)
+    review_text: str
+    pros: str | None = None
+    cons: str | None = None
+    reply_text: str
+    model: str | None = None
+
+
+class ReviewPreviewsOut(BaseModel):
+    items: list[ReviewPreviewItem]

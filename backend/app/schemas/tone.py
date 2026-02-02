@@ -9,6 +9,7 @@ class ToneOut(BaseModel):
     label: str
     hint: str | None = None
     instruction: str | None = None
+    example: str | None = None
     sort_order: int = 0
     is_active: bool = True
 
@@ -18,6 +19,7 @@ class ToneCreate(BaseModel):
     label: str = Field(..., min_length=1, max_length=128)
     hint: str | None = Field(None, max_length=255)
     instruction: str | None = None
+    example: str | None = None
     sort_order: int = 0
     is_active: bool = True
 
@@ -26,5 +28,6 @@ class ToneUpdate(BaseModel):
     label: str | None = Field(None, min_length=1, max_length=128)
     hint: str | None = Field(None, max_length=255)
     instruction: str | None = None
+    example: str | None = None
     sort_order: int | None = None
     is_active: bool | None = None

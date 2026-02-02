@@ -28,12 +28,23 @@ class ToneRepo:
         res = await self.session.execute(select(Tone).where(Tone.code == code))
         return res.scalar_one_or_none()
 
-    async def create(self, *, code: str, label: str, hint: str | None, instruction: str | None, sort_order: int = 0, is_active: bool = True) -> Tone:
+    async def create(
+        self,
+        *,
+        code: str,
+        label: str,
+        hint: str | None,
+        instruction: str | None,
+        example: str | None = None,
+        sort_order: int = 0,
+        is_active: bool = True,
+    ) -> Tone:
         tone = Tone(
             code=code,
             label=label,
             hint=hint,
             instruction=instruction,
+            example=example,
             sort_order=sort_order,
             is_active=is_active,
         )

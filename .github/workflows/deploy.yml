@@ -8,7 +8,7 @@ on:
 jobs:
   deploy:
     if: ${{ contains(github.event.head_commit.message, '[deploy]') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     env:
       USER: root
@@ -19,20 +19,37 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.5.3
+        uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
+      # (Vaqtincha) Key yuklanganini va serverga kira olishini tekshirib olamiz
+      - name: Debug SSH (agent + connect)
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          echo "== ssh-add -l =="
+          ssh-add -l
+          echo "== first public key (safe) =="
+          ssh-add -L | head -n 1
+          echo "== test connect =="
+          ssh -o StrictHostKeyChecking=no -o BatchMode=yes ${{ env.USER }}@${{ env.SERVER_IP }} "echo OK"
+
       - name: Add server to known_hosts
-        run: ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -H ${{ env.SERVER_IP }} >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
 
       - name: Ensure directory exists and sync files
         run: |
-          ssh ${{ env.USER }}@${{ env.SERVER_IP }} "mkdir -p ${{ env.SERVER_DIR }}"
-          rsync -avz --delete \
+          ssh -o BatchMode=yes ${{ env.USER }}@${{ env.SERVER_IP }} "mkdir -p ${{ env.SERVER_DIR }}"
+          rsync -avz --delete -e "ssh -o BatchMode=yes" \
             --exclude '.env' \
             --exclude 'venv/' \
             --exclude 'backend/.env' \
@@ -42,9 +59,9 @@ jobs:
 
       - name: Backend - install deps & restart service
         run: |
-          ssh ${{ env.USER }}@${{ env.SERVER_IP }} << "EOF"
+          ssh -o BatchMode=yes ${{ env.USER }}@${{ env.SERVER_IP }} << "EOF"
             set -e
-            cd ${{ env.SERVER_DIR }}/backend
+            cd /var/www/aveotvet/backend
 
             if [ ! -d "venv" ]; then
               python3 -m venv venv
@@ -66,9 +83,9 @@ jobs:
 
       - name: Frontend - build & restart service
         run: |
-          ssh ${{ env.USER }}@${{ env.SERVER_IP }} << "EOF"
+          ssh -o BatchMode=yes ${{ env.USER }}@${{ env.SERVER_IP }} << "EOF"
             set -e
-            cd ${{ env.SERVER_DIR }}/frontend
+            cd /var/www/aveotvet/frontend
 
             if [ -f "package-lock.json" ]; then
               npm ci

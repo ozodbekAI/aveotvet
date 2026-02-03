@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Table,
   TableBody,
@@ -308,6 +309,12 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
   const stopWords = getNested<string[]>(adv, ["stop_words"], []);
   const tov = getNested<any>(adv, ["tone_of_voice"], {});
   const tonePositive = getNested<string>(tov, ["positive"], "none");
+
+  // Style settings
+  const addressFormat = getNested<string>(adv, ["address_format"], "vy_caps");
+  const answerLength = getNested<string>(adv, ["answer_length"], "default");
+  const useCustomerName = Boolean(getNested(adv, ["use_customer_name"], true));
+  const useProductName = Boolean(getNested(adv, ["use_product_name"], true));
   const toneNeutral = getNested<string>(tov, ["neutral"], "none");
   const toneNegative = getNested<string>(tov, ["negative"], "none");
 
@@ -826,6 +833,86 @@ export default function SettingsModule({ shopId }: { shopId: number | null }) {
         </TabsContent>
 
         <TabsContent value="style" className="space-y-6">
+          {/* Формат обращения */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Формат обращения</CardTitle>
+              <p className="text-sm text-muted-foreground">Употребление в ответах обращения на Вы, Вас, Вам или т.п.</p>
+            </CardHeader>
+            <CardContent>
+              <RadioGroup 
+                value={addressFormat} 
+                onValueChange={(v) => setAdvanced(["address_format"], v)}
+                className="space-y-2"
+              >
+                {[
+                  { value: "vy_caps", label: "Обращение на «Вы»", hint: "Вы, Ваш, Вам — с заглавной буквы" },
+                  { value: "vy_lower", label: "Обращение на «вы»", hint: "вы, ваш, вам — со строчной буквы" },
+                  { value: "ty", label: "Обращение на «ты»", hint: "ты, твой — неформальный стиль" },
+                ].map((opt) => (
+                  <label
+                    key={opt.value}
+                    className="flex items-center gap-3 cursor-pointer"
+                  >
+                    <RadioGroupItem value={opt.value} />
+                    <span className="font-medium">{opt.label}</span>
+                  </label>
+                ))}
+              </RadioGroup>
+            </CardContent>
+          </Card>
+
+          {/* Персонализация ответов */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Персонализация ответов</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-0 divide-y">
+              {cardToggle(
+                "Обращение по имени",
+                "Употребление в ответе обращения к покупателю по имени из его профиля",
+                useCustomerName,
+                (v) => setAdvanced(["use_customer_name"], v),
+              )}
+              {cardToggle(
+                "Упоминание названия товара",
+                "Употребление в ответе названия товара из его карточки",
+                useProductName,
+                (v) => setAdvanced(["use_product_name"], v),
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Длина ответа */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Длина ответа</CardTitle>
+              <p className="text-sm text-muted-foreground">Настройка количества текста в сгенерированном ответе</p>
+            </CardHeader>
+            <CardContent>
+              <RadioGroup 
+                value={answerLength} 
+                onValueChange={(v) => setAdvanced(["answer_length"], v)}
+                className="space-y-2"
+              >
+                {[
+                  { value: "short", label: "Краткий ответ", hint: "1–2 предложения" },
+                  { value: "default", label: "По умолчанию", hint: "2–4 предложения" },
+                  { value: "long", label: "Развёрнутый ответ", hint: "4–6 предложений" },
+                ].map((opt) => (
+                  <label
+                    key={opt.value}
+                    className="flex items-center gap-3 cursor-pointer"
+                  >
+                    <RadioGroupItem value={opt.value} />
+                    <span className="font-medium">{opt.label}</span>
+                  </label>
+                ))}
+              </RadioGroup>
+            </CardContent>
+          </Card>
+
+          {/* Дополнительные опции */}
           <Card>
             <CardHeader>
               <CardTitle>Дополнительные опции</CardTitle>

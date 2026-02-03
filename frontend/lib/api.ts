@@ -599,10 +599,23 @@ export async function listDrafts(
   return apiCall(`/api/drafts/${shopId}/drafts${q ? `?${q}` : ""}`)
 }
 
-export async function listPendingDrafts(shopId: number, params?: { limit?: number; offset?: number }) {
+export async function listPendingDrafts(shopId: number, params?: { 
+  limit?: number
+  offset?: number
+  q?: string
+  has_text?: boolean
+  has_media?: boolean
+  rating_min?: number
+  rating_max?: number
+}) {
   const qs = new URLSearchParams()
   if (params?.limit !== undefined) qs.set("limit", String(params.limit))
   if (params?.offset !== undefined) qs.set("offset", String(params.offset))
+  if (params?.q) qs.set("q", params.q)
+  if (params?.has_text !== undefined) qs.set("has_text", String(params.has_text))
+  if (params?.has_media !== undefined) qs.set("has_media", String(params.has_media))
+  if (params?.rating_min !== undefined) qs.set("rating_min", String(params.rating_min))
+  if (params?.rating_max !== undefined) qs.set("rating_max", String(params.rating_max))
   const q = qs.toString()
   return apiCall(`/api/drafts/${shopId}/drafts/pending${q ? `?${q}` : ""}`)
 }

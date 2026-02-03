@@ -9,6 +9,7 @@ from app.api.access import require_admin_read, require_super_admin
 from app.models.shop import Shop
 from app.core.crypto import encrypt_secret, decrypt_secret
 from app.repos.audit_repo import AuditRepo
+from sqlalchemy import select
 
 
 router = APIRouter()
@@ -50,6 +51,23 @@ async def integration_update(shop_id: int, payload: IntegrationUpdateIn, db: Asy
     shop = await db.get(Shop, int(shop_id))
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
+    
+    # Check if this token is already used by another shop
+    existing_shops = await db.execute(select(Shop).where(Shop.is_active.is_(True), Shop.id != shop_id))
+    for existing_shop in existing_shops.scalars().all():
+        if existing_shop.wb_token_enc:
+            try:
+                existing_token = decrypt_secret(existing_shop.wb_token_enc)
+                if existing_token == payload.wb_token:
+                    raise HTTPException(
+                        status_code=409, 
+                        detail=f"Этот токен уже используется магазином «{existing_shop.name}». Один токен можно использовать только для одного магазина."
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+    
     shop.wb_token_enc = encrypt_secret(payload.wb_token)
     await AuditRepo(db).log("admin.integration.update", int(user.id), entity="shop", entity_id=shop.id)
     await db.commit()

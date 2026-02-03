@@ -108,6 +108,11 @@ async def list_pending_drafts(
     request: Request,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    q: str | None = Query(default=None),
+    has_text: bool | None = Query(default=None),
+    has_media: bool | None = Query(default=None),
+    rating_min: int | None = Query(default=None, ge=1, le=5),
+    rating_max: int | None = Query(default=None, ge=1, le=5),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -120,7 +125,12 @@ async def list_pending_drafts(
     drafts, total = await DraftRepo(db).list_pending(
         shop_id=shop_id,
         limit=limit,
-        offset=offset
+        offset=offset,
+        q=q,
+        has_text=has_text,
+        has_media=has_media,
+        rating_min=rating_min,
+        rating_max=rating_max,
     )
 
     await _attach_product_images(db, shop_id, drafts)

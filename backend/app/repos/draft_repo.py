@@ -97,17 +97,82 @@ class DraftRepo:
         shop_id: int,
         limit: int = 50,
         offset: int = 0,
+        q: str | None = None,
+        has_text: bool | None = None,
+        has_media: bool | None = None,
+        rating_min: int | None = None,
+        rating_max: int | None = None,
     ) -> tuple[list[FeedbackDraft], int]:
         """
-        List pending drafts (status='drafted') for a shop.
+        List pending drafts (status='drafted') for a shop with optional filters.
         These are auto-generated drafts waiting for review.
         """
-        return await self.list_by_shop(
-            shop_id=shop_id,
-            status="drafted",
-            limit=limit,
-            offset=offset
+        query = (
+            select(FeedbackDraft)
+            .join(Feedback)
+            .where(Feedback.shop_id == shop_id)
+            .where(FeedbackDraft.status == "drafted")
+            .options(joinedload(FeedbackDraft.feedback))
+            .order_by(desc(FeedbackDraft.created_at))
         )
+        
+        count_query = (
+            select(func.count(FeedbackDraft.id))
+            .join(Feedback)
+            .where(Feedback.shop_id == shop_id)
+            .where(FeedbackDraft.status == "drafted")
+        )
+        
+        # Text search filter
+        if q:
+            qv = q.strip()
+            if qv:
+                like_pattern = f"%{qv}%"
+                search_cond = (
+                    Feedback.text.ilike(like_pattern) |
+                    Feedback.user_name.ilike(like_pattern)
+                )
+                # Try to match nm_id if numeric
+                try:
+                    nm_val = int(qv)
+                    search_cond = search_cond | (Feedback.nm_id == nm_val)
+                except ValueError:
+                    pass
+                query = query.where(search_cond)
+                count_query = count_query.where(search_cond)
+        
+        # Has text filter
+        if has_text is True:
+            query = query.where(Feedback.text.isnot(None), Feedback.text != "")
+            count_query = count_query.where(Feedback.text.isnot(None), Feedback.text != "")
+        elif has_text is False:
+            query = query.where((Feedback.text.is_(None)) | (Feedback.text == ""))
+            count_query = count_query.where((Feedback.text.is_(None)) | (Feedback.text == ""))
+        
+        # Has media filter
+        if has_media is True:
+            query = query.where(Feedback.photo_links.isnot(None))
+            count_query = count_query.where(Feedback.photo_links.isnot(None))
+        elif has_media is False:
+            query = query.where(Feedback.photo_links.is_(None))
+            count_query = count_query.where(Feedback.photo_links.is_(None))
+        
+        # Rating filter
+        if rating_min is not None:
+            query = query.where(Feedback.product_valuation >= rating_min)
+            count_query = count_query.where(Feedback.product_valuation >= rating_min)
+        if rating_max is not None:
+            query = query.where(Feedback.product_valuation <= rating_max)
+            count_query = count_query.where(Feedback.product_valuation <= rating_max)
+        
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar() or 0
+        
+        query = query.limit(limit).offset(offset)
+        result = await self.session.execute(query)
+        drafts = list(result.scalars().all())
+        
+        return drafts, total
 
     async def get_stats(self, shop_id: int) -> dict:
         """Get draft statistics for a shop."""

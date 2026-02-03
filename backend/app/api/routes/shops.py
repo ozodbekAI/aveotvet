@@ -14,6 +14,7 @@ from app.repos.user_repo import UserRepo
 from app.core.crypto import encrypt_secret, decrypt_secret
 from app.services.wb_analytics_client import WBAnalyticsClient, cache_get, cache_set
 from app.repos.shop_repo import ShopRepo
+from app.repos.job_repo import JobRepo
 from app.schemas.shop import ShopCreate, ShopOut, ShopTokenVerifyIn, ShopTokenVerifyOut
 from app.services.wb_common_client import WBCommonClient, WBCommonApiError
 
@@ -87,6 +88,15 @@ async def create_shop(payload: ShopCreate, db: AsyncSession = Depends(get_db), u
 
     repo = ShopRepo(db)
     shop = await repo.create(owner_user_id=user.id, name=shop_name, wb_token_enc=encrypt_secret(payload.wb_token))
+    
+    # Auto-trigger initial sync for feedbacks, questions, chats, and cards
+    job_repo = JobRepo(db)
+    await job_repo.enqueue("feedback_sync", {"shop_id": shop.id, "is_answered": False, "take": 5000, "skip": 0})
+    await job_repo.enqueue("feedback_sync", {"shop_id": shop.id, "is_answered": True, "take": 5000, "skip": 0})
+    await job_repo.enqueue("questions_sync", {"shop_id": shop.id, "take": 5000, "skip": 0})
+    await job_repo.enqueue("sync_chats", {"shop_id": shop.id})
+    await job_repo.enqueue("cards_sync", {"shop_id": shop.id})
+    
     await db.commit()
     return shop
 

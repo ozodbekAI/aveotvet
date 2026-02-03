@@ -11,9 +11,10 @@ from app.repos.user_repo import UserRepo
 from app.repos.shop_repo import ShopRepo
 from app.repos.shop_billing_repo import ShopBillingRepo
 from app.repos.audit_repo import AuditRepo
+from app.repos.job_repo import JobRepo
 from app.models.shop import Shop
 from app.models.shop_member import ShopMember
-from app.core.crypto import encrypt_secret
+from app.core.crypto import encrypt_secret, decrypt_secret
 from sqlalchemy import select, func
 from app.repos.prompt_repo import PromptRepo
 from app.repos.tone_repo import ToneRepo
@@ -182,6 +183,21 @@ async def list_shops_admin(db: AsyncSession = Depends(get_db), user=Depends(get_
 @router.post("/shops")
 async def create_shop_admin(payload: ShopCreateAdmin, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     await require_admin_write(user)
+    
+    # Check if this token is already used by another shop
+    existing_shops = await db.execute(select(Shop).where(Shop.is_active.is_(True)))
+    for shop in existing_shops.scalars().all():
+        if shop.wb_token_enc:
+            try:
+                existing_token = decrypt_secret(shop.wb_token_enc)
+                if existing_token == payload.wb_token:
+                    raise HTTPException(
+                        status_code=409, 
+                        detail=f"Этот токен уже используется магазином «{shop.name}». Один токен можно использовать только для одного магазина."
+                    )
+            except Exception:
+                pass
+    
     # ensure owner exists
     owner = await UserRepo(db).get(int(payload.owner_user_id))
     if not owner:
@@ -191,6 +207,15 @@ async def create_shop_admin(payload: ShopCreateAdmin, db: AsyncSession = Depends
         name=payload.name,
         wb_token_enc=encrypt_secret(payload.wb_token),
     )
+    
+    # Auto-trigger initial sync for feedbacks, questions, chats, and cards
+    job_repo = JobRepo(db)
+    await job_repo.enqueue("feedback_sync", {"shop_id": shop.id, "is_answered": False, "take": 5000, "skip": 0})
+    await job_repo.enqueue("feedback_sync", {"shop_id": shop.id, "is_answered": True, "take": 5000, "skip": 0})
+    await job_repo.enqueue("questions_sync", {"shop_id": shop.id, "take": 5000, "skip": 0})
+    await job_repo.enqueue("sync_chats", {"shop_id": shop.id})
+    await job_repo.enqueue("cards_sync", {"shop_id": shop.id})
+    
     await db.commit()
     return {"id": shop.id}
 
@@ -215,7 +240,23 @@ async def update_shop_admin(shop_id: int, payload: ShopUpdateAdmin, db: AsyncSes
     if "is_frozen" in data and data["is_frozen"] is not None:
         shop.is_frozen = bool(data["is_frozen"])
     if "wb_token" in data and data["wb_token"]:
-        shop.wb_token_enc = encrypt_secret(str(data["wb_token"]))
+        new_token = str(data["wb_token"])
+        # Check if this token is already used by another shop
+        existing_shops = await db.execute(select(Shop).where(Shop.is_active.is_(True), Shop.id != shop_id))
+        for existing_shop in existing_shops.scalars().all():
+            if existing_shop.wb_token_enc:
+                try:
+                    existing_token = decrypt_secret(existing_shop.wb_token_enc)
+                    if existing_token == new_token:
+                        raise HTTPException(
+                            status_code=409, 
+                            detail=f"Этот токен уже используется магазином «{existing_shop.name}». Один токен можно использовать только для одного магазина."
+                        )
+                except HTTPException:
+                    raise
+                except Exception:
+                    pass
+        shop.wb_token_enc = encrypt_secret(new_token)
 
     await AuditRepo(db).log("admin.shop.update", int(user.id), entity="shop", entity_id=shop_id)
 

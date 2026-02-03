@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { ChevronDown, ChevronUp, Filter, RefreshCw } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ExternalLink, Image as ImageIcon, MessageCircle, RefreshCw, Search } from "lucide-react"
 
 import { useShop } from "@/components/shop-context"
 import {
@@ -11,14 +12,7 @@ import {
 } from "@/lib/api"
 
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -26,41 +20,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import {
-  Pagination,
-  PaginationContent,
-  PaginationEllipsis,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 
 import { ChatDrawer } from "@/components/modules/chat-drawer"
 
-type StatusFilter = {
-  unread: boolean
-  read: boolean
-  unanswered: boolean
-  answered: boolean
-}
-
-const DEFAULT_STATUS: StatusFilter = {
-  unread: false,
-  read: false,
-  unanswered: false,
-  answered: false,
-}
+type StatusFilter = "active" | "closed" | "all"
 
 function safeText(v: any): string {
   if (v == null) return ""
@@ -73,12 +38,14 @@ function safeText(v: any): string {
   return ""
 }
 
-function fmtDateTime(iso: string) {
+function fmtDate(iso: string) {
   const dt = new Date(iso)
   if (Number.isNaN(dt.getTime())) return iso
-  const dd = dt.toLocaleDateString("ru-RU")
-  const tt = dt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
-  return `${dd}\n${tt}`
+  return dt.toLocaleDateString("ru-RU", { 
+    day: "2-digit", 
+    month: "2-digit", 
+    year: "numeric",
+  })
 }
 
 function getLastMessagePreview(session: ChatSessionRow) {
@@ -88,7 +55,6 @@ function getLastMessagePreview(session: ChatSessionRow) {
 }
 
 function getLastMessageDate(session: ChatSessionRow) {
-  // prefer lastMessage.addTimestamp if present, otherwise updated_at
   const lm = session.last_message || {}
   const tsMs =
     typeof lm.addTimestamp === "number" ? lm.addTimestamp : typeof lm.addTimestampMs === "number" ? lm.addTimestampMs : null
@@ -99,374 +65,242 @@ function getLastMessageDate(session: ChatSessionRow) {
   return session.updated_at
 }
 
-function isAnswered(session: ChatSessionRow): boolean | null {
-  // WB payloads differ; try several heuristics.
-  const lm = session.last_message || {}
-  const from = (lm.from || lm.sender || lm.author || lm.userType || "") as any
-  if (typeof lm.isMy === "boolean") return lm.isMy
-  if (typeof lm.isSeller === "boolean") return lm.isSeller
-  if (typeof from === "string") {
-    const s = from.toLowerCase()
-    if (s.includes("seller") || s.includes("operator") || s.includes("support")) return true
-    if (s.includes("buyer") || s.includes("client") || s.includes("user")) return false
-  }
-  return null
+function isActiveChat(session: ChatSessionRow): boolean {
+  return (session.unread_count ?? 0) > 0
 }
 
 export default function ChatsModule() {
   const { shops, shopId, isSuperAdmin } = useShop()
 
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active")
+  const [searchQuery, setSearchQuery] = useState("")
   const [shopFilter, setShopFilter] = React.useState<number | null>(shopId)
+  
   React.useEffect(() => {
-    // keep in sync with global selection unless user picked "all"
     setShopFilter((prev) => (prev === null ? null : shopId))
   }, [shopId])
 
-  const [status, setStatus] = React.useState<StatusFilter>(DEFAULT_STATUS)
+  const [rows, setRows] = useState<ChatSessionRow[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(true)
+  
+  const limit = 20
+  const offsetRef = useRef(0)
+  const loadLockRef = useRef(false)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
 
-  const [range, setRange] = React.useState<{ from?: Date; to?: Date }>({})
-  const [rangeOpen, setRangeOpen] = React.useState(false)
+  const [active, setActive] = useState<ChatSessionRow | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [currentDetailIndex, setCurrentDetailIndex] = useState<number>(0)
 
-  const [sortDir, setSortDir] = React.useState<"desc" | "asc">("desc")
-
-  const [page, setPage] = React.useState(1)
-  const [pageSize, setPageSize] = React.useState(10)
-
-  const [rows, setRows] = React.useState<ChatSessionRow[]>([])
-  const [total, setTotal] = React.useState(0)
-  const [loading, setLoading] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-
-  const [active, setActive] = React.useState<ChatSessionRow | null>(null)
-  const [drawerOpen, setDrawerOpen] = React.useState(false)
-
-  const offset = (page - 1) * pageSize
-
-  const appliedUnread = status.unread && !status.read ? true : status.read && !status.unread ? false : null
-
-  const appliedDateFrom = range.from ? Math.floor(new Date(range.from.setHours(0, 0, 0, 0)).getTime() / 1000) : null
-  const appliedDateTo = range.to ? Math.floor(new Date(range.to.setHours(23, 59, 59, 999)).getTime() / 1000) : null
-
-  const fetchPage = React.useCallback(async () => {
+  const fetchPage = useCallback(async (reset = false) => {
+    if (loadLockRef.current) return
+    loadLockRef.current = true
     setLoading(true)
     setError(null)
+    
     try {
+      const currentOffset = reset ? 0 : offsetRef.current
       const res = await listChatsPage({
         shopId: shopFilter ?? null,
-        limit: pageSize,
-        offset,
-        dateFromUnix: appliedDateFrom,
-        dateToUnix: appliedDateTo,
-        unread: appliedUnread,
+        limit,
+        offset: currentOffset,
+        unread: statusFilter === "active" ? true : null,
       })
 
       let items = res.items || []
 
-      // client-side filtering for answered/unanswered (backend does not currently persist that status reliably)
-      if (status.answered || status.unanswered) {
-        items = items.filter((it) => {
-          const ans = isAnswered(it)
-          if (status.answered && ans === true) return true
-          if (status.unanswered && ans === false) return true
-          return false
-        })
-      }
-
-      // client-side sort toggle (backend default desc)
       items = [...items].sort((a, b) => {
         const da = new Date(getLastMessageDate(a)).getTime()
         const db = new Date(getLastMessageDate(b)).getTime()
-        return sortDir === "desc" ? db - da : da - db
+        return db - da
       })
 
-      setRows(items)
-      setTotal(res.total || 0)
+      if (reset) {
+        setRows(items)
+        offsetRef.current = limit
+        setTotal(res.total || 0)
+        setHasMore(items.length === limit)
+      } else {
+        setRows((prev) => {
+          const seen = new Set(prev.map((r) => `${r.shop_id}:${r.chat_id}`))
+          let added = 0
+          const next = [...prev]
+          for (const r of items) {
+            const key = `${r.shop_id}:${r.chat_id}`
+            if (!seen.has(key)) {
+              seen.add(key)
+              next.push(r)
+              added += 1
+            }
+          }
+          if (added === 0) {
+            setHasMore(false)
+          } else {
+            setHasMore(items.length === limit)
+          }
+          return next
+        })
+        offsetRef.current += limit
+      }
     } catch (e: any) {
       setError(e?.message || "Failed to load chats")
     } finally {
       setLoading(false)
+      loadLockRef.current = false
     }
-  }, [appliedDateFrom, appliedDateTo, appliedUnread, offset, pageSize, shopFilter, sortDir, status.answered, status.unanswered])
+  }, [shopFilter, statusFilter])
 
-  React.useEffect(() => {
-    fetchPage()
-  }, [fetchPage])
+  useEffect(() => {
+    offsetRef.current = 0
+    setHasMore(true)
+    fetchPage(true)
+  }, [fetchPage, shopFilter, statusFilter])
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  useEffect(() => {
+    const el = sentinelRef.current
+    const root = scrollRef.current
+    if (!el || !root) return
 
-  const openChat = (row: ChatSessionRow) => {
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0]
+        if (!first?.isIntersecting) return
+        if (!hasMore || loading) return
+        fetchPage(false)
+      },
+      { root: scrollRef.current, rootMargin: "240px" },
+    )
+
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [hasMore, loading, fetchPage])
+
+  const filteredRows = useMemo(() => {
+    if (!searchQuery.trim()) return rows
+    const q = searchQuery.toLowerCase()
+    return rows.filter((r) => {
+      const clientName = (r.client_name || "").toLowerCase()
+      const productTitle = (r.product_title || "").toLowerCase()
+      const productBrand = (r.product_brand || "").toLowerCase()
+      return clientName.includes(q) || productTitle.includes(q) || productBrand.includes(q)
+    })
+  }, [rows, searchQuery])
+
+  const displayRows = useMemo(() => {
+    if (statusFilter === "all") return filteredRows
+    if (statusFilter === "active") return filteredRows.filter((r) => isActiveChat(r))
+    if (statusFilter === "closed") return filteredRows.filter((r) => !isActiveChat(r))
+    return filteredRows
+  }, [filteredRows, statusFilter])
+
+  const unreadRows = useMemo(() => {
+    return rows.filter((r) => (r.unread_count ?? 0) > 0)
+  }, [rows])
+
+  const openChat = (row: ChatSessionRow, index?: number) => {
+    if (typeof index === "number") {
+      setCurrentDetailIndex(index)
+    }
     setActive(row)
     setDrawerOpen(true)
   }
 
+  const goToPrev = useCallback(() => {
+    if (currentDetailIndex <= 0) return
+    const prevIndex = currentDetailIndex - 1
+    const prevRow = unreadRows[prevIndex]
+    if (!prevRow) return
+    setCurrentDetailIndex(prevIndex)
+    setActive(prevRow)
+  }, [currentDetailIndex, unreadRows])
+
+  const goToNext = useCallback(() => {
+    if (currentDetailIndex >= unreadRows.length - 1) return
+    const nextIndex = currentDetailIndex + 1
+    const nextRow = unreadRows[nextIndex]
+    if (!nextRow) return
+    setCurrentDetailIndex(nextIndex)
+    setActive(nextRow)
+  }, [currentDetailIndex, unreadRows])
+
   const runSync = async () => {
-    // for "all shops" we trigger sync per shop from UI (best-effort).
     if (!shopFilter) {
       const ids = shops.map((s) => s.id)
       await Promise.allSettled(ids.map((id) => syncChats(id)))
     } else {
       await syncChats(shopFilter)
     }
-    await fetchPage()
+    offsetRef.current = 0
+    await fetchPage(true)
   }
 
-  const statusCount = Object.values(status).filter(Boolean).length
+  const statusLabel = statusFilter === "active" ? "Активные" : statusFilter === "closed" ? "Закрытые" : "Все"
 
-  return (
-    <div className="flex h-full w-full flex-col gap-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <Popover open={rangeOpen} onOpenChange={setRangeOpen}>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                Период
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-2" align="start">
-              <div className="p-1">
-                <Calendar
-                  mode="range"
-                  selected={{ from: range.from, to: range.to } as any}
-                  onSelect={(v: any) => setRange({ from: v?.from, to: v?.to })}
-                  numberOfMonths={2}
-                />
-                <div className="mt-2 flex items-center justify-end gap-2">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      setRange({})
-                      setRangeOpen(false)
-                      setPage(1)
-                    }}
-                  >
-                    Сбросить
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      setRangeOpen(false)
-                      setPage(1)
-                      fetchPage()
-                    }}
-                  >
-                    Применить
-                  </Button>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
-
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                Статус
-                {statusCount > 0 ? <Badge variant="secondary">{statusCount}</Badge> : null}
-                <ChevronDown className="h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[260px] p-3" align="start">
-              <div className="flex flex-col gap-2">
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <Checkbox checked={status.unread} onCheckedChange={(v) => setStatus((s) => ({ ...s, unread: Boolean(v) }))} />
-                  Непрочитанные
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <Checkbox checked={status.read} onCheckedChange={(v) => setStatus((s) => ({ ...s, read: Boolean(v) }))} />
-                  Прочитанные
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <Checkbox checked={status.unanswered} onCheckedChange={(v) => setStatus((s) => ({ ...s, unanswered: Boolean(v) }))} />
-                  Неотвеченные
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <Checkbox checked={status.answered} onCheckedChange={(v) => setStatus((s) => ({ ...s, answered: Boolean(v) }))} />
-                  Отвеченные
-                </label>
-
-                <Button
-                  className="mt-2"
-                  onClick={() => {
-                    setPage(1)
-                    fetchPage()
-                  }}
-                >
-                  Применить
-                </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
-
-          <div className="min-w-[220px]">
-            <Select
-              value={shopFilter === null ? "all" : String(shopFilter)}
-              onValueChange={(v) => {
-                setPage(1)
-                setShopFilter(v === "all" ? null : Number(v))
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Все магазины" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все магазины</SelectItem>
-                {shops.map((s) => (
-                  <SelectItem key={s.id} value={String(s.id)}>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <Button variant="outline" onClick={runSync} className="gap-2" disabled={loading || (!shopFilter && !isSuperAdmin)}>
-            <RefreshCw className={cn("h-4 w-4", loading ? "animate-spin" : "")} />
-            Синхронизировать
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-sm">На странице:</span>
-          <Select
-            value={String(pageSize)}
-            onValueChange={(v) => {
-              setPageSize(Number(v))
-              setPage(1)
-            }}
-          >
-            <SelectTrigger className="w-[90px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="10">10</SelectItem>
-              <SelectItem value="20">20</SelectItem>
-              <SelectItem value="50">50</SelectItem>
-            </SelectContent>
-          </Select>
+  if (!shopId) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="rounded-2xl border border-border bg-card p-8 text-center">
+          <div className="text-lg font-semibold text-foreground">Магазин не выбран</div>
+          <div className="text-sm text-muted-foreground mt-2">Выберите магазин, чтобы работать с чатами.</div>
         </div>
       </div>
+    )
+  }
 
-      <Card className="overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[60%]">Последнее сообщение</TableHead>
-              <TableHead>Пользователь</TableHead>
-              <TableHead className="text-center">Непрочитанных сообщений</TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => setSortDir((d) => (d === "desc" ? "asc" : "desc"))}>
-                <div className="flex items-center gap-1">
-                  Дата
-                  {sortDir === "desc" ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-                </div>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={4} className="text-muted-foreground py-10 text-center">
-                  Загрузка...
-                </TableCell>
-              </TableRow>
-            ) : error ? (
-              <TableRow>
-                <TableCell colSpan={4} className="text-destructive py-10 text-center">
-                  {error}
-                </TableCell>
-              </TableRow>
-            ) : rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={4} className="text-muted-foreground py-10 text-center">
-                  Чатов не найдено
-                </TableCell>
-              </TableRow>
-            ) : (
-              rows.map((r) => (
-                <TableRow key={`${r.shop_id}:${r.chat_id}`} onClick={() => openChat(r)} className="cursor-pointer">
-                  <TableCell className="whitespace-normal">
-                    <div className="flex items-start gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{getLastMessagePreview(r)}</span>
-                          {r.shop_name ? <span className="text-muted-foreground text-xs">• {r.shop_name}</span> : null}
-                        </div>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell className="whitespace-normal">{r.client_name || "—"}</TableCell>
-                  <TableCell className="text-center">
-                    {r.unread_count > 0 ? <Badge variant="default">{r.unread_count}</Badge> : <span className="text-muted-foreground">0</span>}
-                  </TableCell>
-                  <TableCell className="whitespace-pre-line text-sm">{fmtDateTime(getLastMessageDate(r))}</TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </Card>
-
+  return (
+    <div className="h-full min-h-0 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
-        <Pagination>
-          <PaginationContent>
-            <PaginationItem>
-              <PaginationPrevious
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault()
-                  setPage((p) => Math.max(1, p - 1))
-                }}
-              />
-            </PaginationItem>
+        <h1 className="text-2xl font-bold text-foreground">Чаты — {statusLabel}</h1>
+        <Button variant="outline" onClick={runSync} className="gap-2" disabled={loading || (!shopFilter && !isSuperAdmin)}>
+          <RefreshCw className={cn("h-4 w-4", loading ? "animate-spin" : "")} />
+          Синхронизировать
+        </Button>
+      </div>
 
-            {(() => {
-              const links: React.ReactNode[] = []
-              const pushPage = (p: number) =>
-                links.push(
-                  <PaginationItem key={p}>
-                    <PaginationLink
-                      href="#"
-                      isActive={p === page}
-                      onClick={(e) => {
-                        e.preventDefault()
-                        setPage(p)
-                      }}
-                    >
-                      {p}
-                    </PaginationLink>
-                  </PaginationItem>,
-                )
+      {error && <div className="text-sm text-destructive">{error}</div>}
 
-              const max = totalPages
-              const windowSize = 5
-              const start = Math.max(1, page - 2)
-              const end = Math.min(max, start + windowSize - 1)
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Поиск по покупателю или товару"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-10 h-11 rounded-xl border-border"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+          <SelectTrigger className="w-[140px] h-11 rounded-xl border-primary">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="active">Активные</SelectItem>
+            <SelectItem value="closed">Закрытые</SelectItem>
+            <SelectItem value="all">Все</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
-              if (start > 1) {
-                pushPage(1)
-                if (start > 2) links.push(<PaginationItem key="e1"><PaginationEllipsis /></PaginationItem>)
-              }
-              for (let p = start; p <= end; p++) pushPage(p)
-              if (end < max) {
-                if (end < max - 1) links.push(<PaginationItem key="e2"><PaginationEllipsis /></PaginationItem>)
-                pushPage(max)
-              }
-              return links
-            })()}
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto space-y-4">
+        {loading && rows.length === 0 ? (
+          <div className="p-8 text-center text-muted-foreground">Загрузка…</div>
+        ) : displayRows.length ? (
+          displayRows.map((r, idx) => (
+            <ChatCard key={`${r.shop_id}:${r.chat_id}`} row={r} shops={shops} onOpen={() => openChat(r, idx)} />
+          ))
+        ) : (
+          <div className="p-8 text-center text-muted-foreground">Чатов не найдено</div>
+        )}
 
-            <PaginationItem>
-              <PaginationNext
-                href="#"
-                onClick={(e) => {
-                  e.preventDefault()
-                  setPage((p) => Math.min(totalPages, p + 1))
-                }}
-              />
-            </PaginationItem>
-          </PaginationContent>
-        </Pagination>
-
-        <div className="text-muted-foreground text-sm">Всего: {total}</div>
+        <div ref={sentinelRef} className="h-1" />
+        
+        {loading && rows.length > 0 && (
+          <div className="p-4 text-center text-muted-foreground">Загрузка…</div>
+        )}
       </div>
 
       <ChatDrawer
@@ -476,8 +310,88 @@ export default function ChatsModule() {
           if (!v) setActive(null)
         }}
         session={active}
-        onSent={fetchPage}
+        onSent={() => fetchPage(true)}
+        onPrev={unreadRows.length > 1 ? goToPrev : undefined}
+        onNext={unreadRows.length > 1 ? goToNext : undefined}
+        currentIndex={currentDetailIndex}
+        totalCount={unreadRows.length}
       />
+    </div>
+  )
+}
+
+interface ChatCardProps {
+  row: ChatSessionRow
+  shops: { id: number; name: string }[]
+  onOpen: () => void
+}
+
+function ChatCard({ row, shops, onOpen }: ChatCardProps) {
+  const isActive = isActiveChat(row)
+  const lastDate = fmtDate(getLastMessageDate(row))
+  const lastMessage = getLastMessagePreview(row)
+
+  const marketplaceInfo = [
+    "Wildberries",
+    row.product_brand,
+    row.nm_id ? `Арт. ${row.nm_id}` : null,
+  ].filter(Boolean).join(" · ")
+
+  return (
+    <div className="flex items-start gap-4 p-4 rounded-xl border border-border bg-card hover:bg-accent/5 transition-colors">
+      <div className="w-14 h-14 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 overflow-hidden">
+        {row.product_thumb_url ? (
+          <img src={row.product_thumb_url} alt="" className="w-full h-full object-cover" />
+        ) : (
+          <ImageIcon className="h-6 w-6 text-muted-foreground" />
+        )}
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={onOpen}
+              className="text-base font-medium text-amber-600 dark:text-amber-500 hover:underline text-left line-clamp-1"
+            >
+              {row.product_title || "Товар"}
+            </button>
+            {isActive ? (
+              <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-400 border-0 gap-1">
+                Активный
+                {row.unread_count > 0 && (
+                  <span className="ml-1 w-5 h-5 rounded-full bg-amber-500 text-white text-xs flex items-center justify-center">
+                    {row.unread_count}
+                  </span>
+                )}
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="border-0">
+                Закрыт
+              </Badge>
+            )}
+          </div>
+          <span className="text-sm text-muted-foreground whitespace-nowrap">{lastDate}</span>
+        </div>
+
+        <div className="text-xs text-muted-foreground mt-1">
+          {marketplaceInfo}
+        </div>
+
+        <div className="flex items-start gap-2 mt-2 text-sm text-foreground">
+          <MessageCircle className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
+          <span className="line-clamp-1">{lastMessage}</span>
+        </div>
+
+        <div className="text-sm text-muted-foreground mt-2">
+          Покупатель: {row.client_name || "Неизвестно"}
+        </div>
+      </div>
+
+      <Button variant="outline" size="sm" onClick={onOpen} className="gap-2 flex-shrink-0">
+        Открыть
+        <ExternalLink className="h-4 w-4" />
+      </Button>
     </div>
   )
 }

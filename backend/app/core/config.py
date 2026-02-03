@@ -36,11 +36,11 @@ class Settings(BaseSettings):
 
     # Autosync (worker scheduler)
     AUTO_SYNC_ENABLED: bool = True
-    AUTO_SYNC_INTERVAL_MIN: int = 60
+    AUTO_SYNC_INTERVAL_MIN: int = 120       # 2h - feedbacks sync
 
     # Questions/chats sync intervals
     QUESTIONS_SYNC_INTERVAL_MIN: int = 120  # 2h
-    CHATS_SYNC_INTERVAL_MIN: int = 60       # 1h
+    CHATS_SYNC_INTERVAL_MIN: int = 120      # 2h
     FULL_SYNC_INTERVAL_MIN: int = 120       # 2h - full sync all data
 
     # Autosync safety caps

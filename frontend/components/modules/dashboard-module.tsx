@@ -274,7 +274,10 @@ export default function DashboardModule() {
           {/* Feedbacks */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Card className="border-border cursor-pointer hover:border-primary/50 transition-colors">
+              <Card 
+                className="border-border cursor-pointer hover:border-primary/50 transition-colors"
+                onClick={() => router.push("/app/feedbacks")}
+              >
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
                     <div className="text-4xl font-bold text-foreground">
@@ -315,7 +318,10 @@ export default function DashboardModule() {
           {/* Questions */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Card className="border-border cursor-pointer hover:border-primary/50 transition-colors">
+              <Card 
+                className="border-border cursor-pointer hover:border-primary/50 transition-colors"
+                onClick={() => router.push("/app/questions")}
+              >
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
                     <div className="text-4xl font-bold text-foreground">
@@ -356,7 +362,10 @@ export default function DashboardModule() {
           {/* Chats */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Card className="border-border cursor-pointer hover:border-primary/50 transition-colors">
+              <Card 
+                className="border-border cursor-pointer hover:border-primary/50 transition-colors"
+                onClick={() => router.push("/app/chats")}
+              >
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between">
                     <div className="text-4xl font-bold text-foreground">
@@ -397,7 +406,10 @@ export default function DashboardModule() {
           {/* Rating with distribution */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Card className="border-border cursor-pointer hover:border-primary/50 transition-colors">
+              <Card 
+                className="border-border cursor-pointer hover:border-primary/50 transition-colors"
+                onClick={() => router.push("/app/feedbacks")}
+              >
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-center gap-2">
                     <div className="text-4xl font-bold text-foreground">
@@ -579,31 +591,52 @@ function RatingDistributionBlock({ distribution }: { distribution: RatingDistrib
     <div className="space-y-3">
       <div className="flex justify-between items-center">
         <span className="font-medium text-foreground">Новых оценок</span>
-        <span className="font-bold text-lg">{total.toLocaleString()}</span>
+        <span className="font-bold text-lg text-foreground">{total.toLocaleString()}</span>
       </div>
       <div className="space-y-2">
-        {ratings.map((r) => (
-          <div key={r.stars} className="flex items-center gap-2">
-            <div className="flex items-center gap-1 w-10">
-              <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-              <span className="text-sm font-medium">{r.stars}</span>
+        {ratings.map((r) => {
+          // Distinct colors for each star rating
+          const barColor = r.stars === 5 
+            ? 'bg-green-500' 
+            : r.stars === 4 
+              ? 'bg-yellow-400' 
+              : r.stars === 3 
+                ? 'bg-purple-500' 
+                : r.stars === 2 
+                  ? 'bg-orange-500' 
+                  : 'bg-red-500';
+          
+          const starColor = r.stars === 5 
+            ? 'text-green-500 fill-green-500' 
+            : r.stars === 4 
+              ? 'text-yellow-400 fill-yellow-400' 
+              : r.stars === 3 
+                ? 'text-purple-500 fill-purple-500' 
+                : r.stars === 2 
+                  ? 'text-orange-500 fill-orange-500' 
+                  : 'text-red-500 fill-red-500';
+
+          return (
+            <div key={r.stars} className="flex items-center gap-2">
+              <div className="flex items-center gap-1 w-10">
+                <Star className={`w-3 h-3 ${starColor}`} />
+                <span className="text-sm font-medium">{r.stars}</span>
+              </div>
+              <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                <div 
+                  className={`h-full transition-all ${barColor}`}
+                  style={{ width: `${(r.count / maxCount) * 100}%` }}
+                />
+              </div>
+              <span className="text-sm w-16 text-right tabular-nums">{r.count.toLocaleString()}</span>
+              {r.growth !== 0 && (
+                <span className={`text-xs w-12 text-right ${r.growth > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatGrowth(r.growth)}
+                </span>
+              )}
             </div>
-            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-              <div 
-                className={`h-full transition-all ${
-                  r.stars >= 4 ? 'bg-yellow-400' : r.stars === 3 ? 'bg-purple-400' : 'bg-orange-400'
-                }`}
-                style={{ width: `${(r.count / maxCount) * 100}%` }}
-              />
-            </div>
-            <span className="text-sm w-16 text-right tabular-nums">{r.count.toLocaleString()}</span>
-            {r.growth !== 0 && (
-              <span className={`text-xs w-12 text-right ${r.growth > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {formatGrowth(r.growth)}
-              </span>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   )

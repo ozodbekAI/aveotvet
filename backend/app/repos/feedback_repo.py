@@ -119,13 +119,16 @@ class FeedbackRepo:
                 Feedback.text.ilike(like),
                 Feedback.pros.ilike(like),
                 Feedback.cons.ilike(like),
+                Feedback.user_name.ilike(like),
                 # Search product details (name, brand, supplier article)
                 Feedback.product_details["productName"].astext.ilike(like),
                 Feedback.product_details["brandName"].astext.ilike(like),
                 Feedback.product_details["supplierArticle"].astext.ilike(like),
             ]
 
+            # Also search by nm_id column directly
             if qv.isdigit():
+                exprs.append(Feedback.nm_id == int(qv))
                 # Direct match by nmId / imtId stored in productDetails
                 exprs.append(Feedback.product_details["nmId"].astext == qv)
                 exprs.append(Feedback.product_details["nmID"].astext == qv)

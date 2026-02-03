@@ -34,9 +34,18 @@ export default function FeedbacksModule({ shopId }: { shopId: number | null }) {
   const [section, setSection] = useState<Section>("waiting")
 
   const [q, setQ] = useState("")
+  const [debouncedQ, setDebouncedQ] = useState("")
   const [rating, setRating] = useState("all")
   const [textFilter, setTextFilter] = useState("all")
   const [photoFilter, setPhotoFilter] = useState("all")
+
+  // Debounce search query
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQ(q)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [q])
 
   const [rows, setRows] = useState<FeedbackRow[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -100,10 +109,41 @@ export default function FeedbacksModule({ shopId }: { shopId: number | null }) {
 
       setIsLoading(true)
       try {
+        // Parse filter values for both sections
+        const has_text = textFilter === "all" ? undefined : textFilter === "with"
+        const has_media = photoFilter === "all" ? undefined : photoFilter === "with"
+        
+        // Parse rating filter - supports "all", "3", "1-2", "4-5"
+        let rating_min: number | undefined
+        let rating_max: number | undefined
+        if (rating !== "all") {
+          if (rating === "1-2") {
+            rating_min = 1
+            rating_max = 2
+          } else if (rating === "4-5") {
+            rating_min = 4
+            rating_max = 5
+          } else {
+            const num = Number(rating)
+            if (Number.isFinite(num)) {
+              rating_min = num
+              rating_max = num
+            }
+          }
+        }
+
         // Handle drafts section separately
         if (section === "drafts") {
           const currentOffset = reset ? 0 : draftOffsetRef.current
-          const data = await listPendingDrafts(shopId, { limit, offset: currentOffset })
+          const data = await listPendingDrafts(shopId, { 
+            limit, 
+            offset: currentOffset,
+            q: debouncedQ || undefined,
+            has_text,
+            has_media,
+            rating_min,
+            rating_max,
+          })
           const list = (Array.isArray(data) ? data : []) as any[]
           const mapped: DraftRow[] = list.map((it) => {
             const fb = it?.feedback || it?.raw?.feedback || it?.feedback_data || null
@@ -146,32 +186,10 @@ export default function FeedbacksModule({ shopId }: { shopId: number | null }) {
 
         const nextOffset = reset ? 0 : offsetRef.current
 
-        const has_text = textFilter === "all" ? undefined : textFilter === "with"
-        const has_media = photoFilter === "all" ? undefined : photoFilter === "with"
-        
-        // Parse rating filter - supports "all", "3", "1-2", "4-5"
-        let rating_min: number | undefined
-        let rating_max: number | undefined
-        if (rating !== "all") {
-          if (rating === "1-2") {
-            rating_min = 1
-            rating_max = 2
-          } else if (rating === "4-5") {
-            rating_min = 4
-            rating_max = 5
-          } else {
-            const num = Number(rating)
-            if (Number.isFinite(num)) {
-              rating_min = num
-              rating_max = num
-            }
-          }
-        }
-
         // IMPORTANT: only limit/offset (no date_from_unix/date_to_unix)
         const data = await listFeedbacks(shopId, {
           is_answered: section === "waiting" ? false : section === "answered" ? true : undefined,
-          q: q || undefined,
+          q: debouncedQ || undefined,
           limit,
           offset: nextOffset,
           rating_min,
@@ -219,7 +237,7 @@ export default function FeedbacksModule({ shopId }: { shopId: number | null }) {
       }
     },
     // IMPORTANT: do not depend on `offset` or `draftOffset` here; we read them from refs.
-    [shopId, textFilter, photoFilter, rating, section, q, setOffsetSafe],
+    [shopId, textFilter, photoFilter, rating, section, debouncedQ, setOffsetSafe],
   )
 
   useEffect(() => {
@@ -229,7 +247,7 @@ export default function FeedbacksModule({ shopId }: { shopId: number | null }) {
     setHasMore(true)
     setDraftHasMore(true)
     load(true)
-  }, [shopId, section, q, rating, textFilter, photoFilter, load, setOffsetSafe])
+  }, [shopId, section, debouncedQ, rating, textFilter, photoFilter, load, setOffsetSafe])
 
   // Load analytics
   useEffect(() => {

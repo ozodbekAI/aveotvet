@@ -24,6 +24,11 @@ type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   session: ChatSessionRow | null
+  onSent?: () => void
+  onPrev?: () => void
+  onNext?: () => void
+  currentIndex?: number
+  totalCount?: number
 }
 
 type AttachmentImage = {
@@ -127,7 +132,7 @@ function normalizeAttachments(att: any): Attachments | null {
   }
 }
 
-export function ChatDrawer({ open, onOpenChange, session }: Props) {
+export function ChatDrawer({ open, onOpenChange, session, onSent, onPrev, onNext, currentIndex, totalCount }: Props) {
   const [loading, setLoading] = React.useState(false)
   const [messages, setMessages] = React.useState<ChatMsg[]>([])
   const [text, setText] = React.useState("")
@@ -199,7 +204,7 @@ export function ChatDrawer({ open, onOpenChange, session }: Props) {
     }
   }
 
-  const onSend = async () => {
+  const onSendMessage = async () => {
     if (!shopId || !chatId) return
     if (!text.trim()) {
       toast.error("Введите текст сообщения")
@@ -211,6 +216,7 @@ export function ChatDrawer({ open, onOpenChange, session }: Props) {
       setText("")
       toast.success("Отправлено")
       await load()
+      onSent?.()
     } catch (err: any) {
       toast.error(err?.message || "Не удалось отправить")
     } finally {
@@ -267,11 +273,34 @@ export function ChatDrawer({ open, onOpenChange, session }: Props) {
               </div>
             </div>
 
-            <DrawerClose asChild>
-              <Button variant="ghost" size="icon" aria-label="Закрыть">
-                <X className="h-4 w-4" />
-              </Button>
-            </DrawerClose>
+            <div className="flex items-center gap-2">
+              {onPrev && onNext && typeof totalCount === "number" && totalCount > 1 && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onPrev}
+                    disabled={(currentIndex ?? 0) <= 0 || loading}
+                  >
+                    ← Назад
+                  </Button>
+                  <span>{(currentIndex ?? 0) + 1} / {totalCount}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onNext}
+                    disabled={(currentIndex ?? 0) >= totalCount - 1 || loading}
+                  >
+                    Далее →
+                  </Button>
+                </div>
+              )}
+              <DrawerClose asChild>
+                <Button variant="ghost" size="icon" aria-label="Закрыть">
+                  <X className="h-4 w-4" />
+                </Button>
+              </DrawerClose>
+            </div>
           </div>
         </DrawerHeader>
 
@@ -398,7 +427,7 @@ export function ChatDrawer({ open, onOpenChange, session }: Props) {
                 maxLength={1000}
                 disabled={sending}
               />
-              <Button onClick={onSend} disabled={sending || !text.trim()}>
+              <Button onClick={onSendMessage} disabled={sending || !text.trim()}>
                 {sending ? "Отправка…" : "Отправить"}
               </Button>
             </div>
